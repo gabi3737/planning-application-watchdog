@@ -75,7 +75,7 @@ def save_pdf(content: bytes, filename: str):
         f.write(content)
 
 
-def read_pdf(content: bytes) -> PdfReader:
+def read_pdf(content: bytes) -> None:
     """Read the given PDF content and print its text content."""
     with io.BytesIO(content) as pdf_file:
         print("PDF Reader")
