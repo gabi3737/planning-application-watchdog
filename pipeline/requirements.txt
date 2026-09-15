@@ -2,3 +2,9 @@ requests
 pandas
 pytest
 pytest-cov
+pypdf
+bs4
+certifi
+curl-cffi
+pylint
+
