@@ -104,3 +104,6 @@ pipeline/models/*
 pipeline/tmp/*
 
 interview/
+
+/documents/*
+*.pdf
