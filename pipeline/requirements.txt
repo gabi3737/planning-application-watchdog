@@ -1,0 +1,7 @@
+pypdf
+bs4
+certifi
+curl-cffi
+pylint
+pytest
+requests
