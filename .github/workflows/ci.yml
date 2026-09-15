@@ -1,0 +1,91 @@
+name: Python CI
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+        branches: [main]
+
+permissions:
+    contents: read
+
+jobs:
+    quality-gates:
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Set up Python
+              uses: actions/setup-python@v4
+              with:
+                python-version: '3.11'
+                cache: 'pip'
+
+            - name: Install dashboard dependencies
+              run: |
+                python -m pip install --upgrade pip
+                pip install -r dashboard/requirements.txt
+                pip install pytest pytest-cov pylint
+
+            - name: install pipeline dependencies
+              run: |
+                pip install -r pipeline/requirements.txt
+                pip install pytest pytest-cov pylint
+
+            - name: Lint pipeline
+              run: |
+                pylint \
+                  --recursive=y \
+                  --fail-under=6 \
+                  pipeline/
+
+            # - name: Lint dashboard
+            #   run: |
+            #     pylint \
+            #       --recursive=y \
+            #       --fail-under=6 \
+            #       dashboard/
+            
+            # - name: Lint terraform lambda
+            #   run: |
+            #     pylint \
+            #       --recursive=y \
+            #       --fail-under=6 \
+            #       terraform/lambda/
+
+            # - name: Test dashboard
+            #   run: |
+            #     pytest \
+            #       --cov=dashboard/ \
+            #       --cov-report=term-missing \
+            #       --cov-report=xml \
+            #       --cov-fail-under=50 \
+            #       -v \
+            #       dashboard/
+
+            - name: Test pipeline
+              run: |
+                pytest \
+                  --cov=pipeline/ \
+                  --cov-report=term-missing \
+                  --cov-report=xml \
+                  --cov-fail-under=60 \
+                  -v \
+                  pipeline/
+
+            # - name: Install terraform lambda dependencies
+            #   run: |
+            #     pip install -r terraform/lambda/requirements.txt
+            #     pip install pytest pytest-cov pylint
+
+            # - name: Test terraform handler
+            #   run: |
+            #     pytest \
+            #       --cov=terraform/lambda/ \
+            #       --cov-report=term-missing \
+            #       --cov-report=xml \
+            #       --cov-fail-under=50 \
+            #       -v \
+            #       terraform/lambda/
