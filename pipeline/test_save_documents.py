@@ -29,15 +29,17 @@ def test_load_webpage(mock_get):
 
 
 @patch("save_documents.requests.Session.get")
-def test_load_webpage_failure_case(mock_get):
+@patch("save_documents.logging")
+def test_load_webpage_failure_case(mock_logging, mock_get):
     session = create_session()
     url = "https://example.co.uk/applications?activeTab=documents"
     mock_get.return_value.status_code = 404
     mock_get.return_value.text = "<html></html>"
     mock_get.return_value.raise_for_status.side_effect = HTTPError(
         "404 Not Found")
-    with pytest.raises(HTTPError):
-        load_webpage(url, session)
+    result = load_webpage(url, session)
+    assert result is None
+    mock_logging.error.assert_called()
 
 
 def test_find_pdf_urls():

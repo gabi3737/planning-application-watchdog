@@ -52,12 +52,11 @@ def load_webpage(url: str, session: requests.Session) -> BeautifulSoup:
         response = session.get(url,
                                allow_redirects=True, timeout=(5, 10), verify=certifi.where())
         response.raise_for_status()
+        soup = BeautifulSoup(response.text, "html.parser")
+        return soup
     except HTTPError as e:
         logging.error(f"HTTP error loading webpage {url}: {e}")
         return None
-    try:
-        soup = BeautifulSoup(response.text, "html.parser")
-        return soup
     except Exception as e:
         logging.error(f"Error loading html content from webpage {url}: {e}")
         return None
