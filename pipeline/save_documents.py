@@ -15,9 +15,9 @@ import certifi
 
 
 # Newham
-URL = "https://pa.newham.gov.uk/online-applications/applicationDetails.do?keyVal=TKQFJUJYHR000&activeTab=summary"
+NEWHAM_URL = "https://pa.newham.gov.uk/online-applications/applicationDetails.do?keyVal=TKQFJUJYHR000&activeTab=summary"
 # Tower Hamlets
-URL = "https://development.towerhamlets.gov.uk/online-applications/applicationDetails.do?keyVal=DCAPR_151446&activeTab=summary"
+TOWER_HAMLETS_URL = "https://development.towerhamlets.gov.uk/online-applications/applicationDetails.do?keyVal=DCAPR_151446&activeTab=summary"
 
 
 HEADERS = {
@@ -86,9 +86,9 @@ def read_pdf(content: bytes) -> None:
 
 if __name__ == "__main__":
     session = create_session()
-    URL = convert_url_to_documents_url(URL)
-    html_content = load_webpage(URL, session)
-    pdf_urls = find_pdf_urls(html_content, URL)
+    url = convert_url_to_documents_url(TOWER_HAMLETS_URL)
+    html_content = load_webpage(url, session)
+    pdf_urls = find_pdf_urls(html_content, url)
     pdf_url = pdf_urls[0]
     pdf_content = get_pdf(pdf_url, session)
     os.makedirs("documents", exist_ok=True)
