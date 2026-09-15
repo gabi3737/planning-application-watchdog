@@ -26,7 +26,7 @@ TOWER_HAMLETS_URL = "https://development.towerhamlets.gov.uk/online-applications
 
 
 HEADERS = {
-    "Referer": URL,
+    "Referer": TOWER_HAMLETS_URL,
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
     "Accept": "application/pdf"
 }
