@@ -5,3 +5,4 @@ curl-cffi
 pylint
 pytest
 requests
+pytest-cov
