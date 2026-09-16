@@ -1,6 +1,6 @@
 # DynamoDB Tables
 
-resource "aws_dynamodb_table" "c25-planning-data-db" {
+resource "aws_dynamodb_table" "c25_planning_data_db" {
   name         = "c25-planning-data-db"
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "area"
@@ -19,7 +19,7 @@ resource "aws_dynamodb_table" "c25-planning-data-db" {
 } # Maybe add GSI for postcode
 
 
-resource "aws_dynamodb_table" "c25-planning-user-db" {
+resource "aws_dynamodb_table" "c25_planning_user_db" {
   name         = "c25-planning-user-db"
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "area"
@@ -99,7 +99,7 @@ resource "aws_iam_role_policy" "lambda_etl_policy" {
           "dynamodb:DeleteItem"
         ]
 
-        Resource = aws_dynamodb_table.c25-planning-data-db.arn
+        Resource = aws_dynamodb_table.c25_planning_data_db.arn
       },
       {
         Effect = "Allow"
@@ -113,7 +113,7 @@ resource "aws_iam_role_policy" "lambda_etl_policy" {
           "dynamodb:DeleteItem"
         ]
 
-        Resource = aws_dynamodb_table.c25-planning-user-db.arn
+        Resource = aws_dynamodb_table.c25_planning_user_db.arn
       }
     ]
   })
