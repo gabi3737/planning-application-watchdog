@@ -2,7 +2,7 @@
 Extract planning applications from the PlanIt API and save to CSV.
 
 Usage:
-    python3 extract.py [--start-date YYYY-MM-DD] [--end-date YYYY-MM-DD]
+    python3 extract.py [--start-date YYYY-MM-DD] [--end-date YYYY-MM-DD] [--save-pdf]
 """
 
 import argparse
@@ -253,13 +253,23 @@ def save_to_csv(records: List[Dict], area_name: str) -> Path:
     return csv_path
 
 
-def main(start_date: str = None, end_date: str = None):
-    """Extract planning applications for all areas and download PDFs."""
+def main(start_date: str = None, end_date: str = None, save_pdf: bool = False):
+    """Extract planning applications for all areas.
+    
+    Args:
+        start_date: Start date (YYYY-MM-DD) or None for last 7 days
+        end_date: End date (YYYY-MM-DD) or None for last 7 days
+        save_pdf: If True, download PDFs for each application
+    """
     if not start_date or not end_date:
         start_date, end_date = calculate_date_range()
 
     logger.info(f"Extracting data for {start_date} to {end_date}")
-    session = create_session()
+    if save_pdf:
+        logger.info("PDF download enabled")
+        session = create_session()
+    else:
+        session = None
 
     for auth_code, area_name in AREA_CODES.items():
         logger.info(f"Processing {area_name} (auth={auth_code})")
@@ -274,24 +284,24 @@ def main(start_date: str = None, end_date: str = None):
         if extracted:
             save_to_csv(extracted, area_name)
 
-            # Download PDFs for each application
-            total_pdfs = 0
-            for record in extracted:
-                if record.get("url"):
-                    pdfs_saved = download_documents(
-                        record["url"], session, record["uid"])
-                    total_pdfs += pdfs_saved
+            # Download PDFs for each application if enabled
+            if save_pdf and session:
+                total_pdfs = 0
+                for record in extracted:
+                    if record.get("url"):
+                        pdfs_saved = download_documents(
+                            record["url"], session, record["uid"])
+                        total_pdfs += pdfs_saved
 
-            logger.info(f"  PDFs downloaded for {area_name}: {total_pdfs}")
-        else:
-            logger.warning(f"No data extracted for {area_name}")
-
+                logger.info(f"  PDFs downloaded for {area_name}: {total_pdfs}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Extract planning applications")
     parser.add_argument("--start-date", help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end-date", help="End date (YYYY-MM-DD)")
+    parser.add_argument("--save-pdf", action="store_true",
+                        help="Download PDFs for each application")
     args = parser.parse_args()
 
-    main(args.start_date, args.end_date)
+    main(args.start_date, args.end_date, args.save_pdf)
