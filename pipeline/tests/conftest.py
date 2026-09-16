@@ -14,7 +14,7 @@ def mock_app_response():
         "app_size": "Small",
         "area_id": 318,
         "area_name": "Newham",
-        "link": "https://www.planit.org.uk/planapplic/Newham/26/01919/CLP/",
+        "url": "https://www.planit.org.uk/planapplic/Newham/26/01919/CLP/",
         "location_x": 0.031164,
         "location_y": 51.551453,
         "other_fields": {
@@ -34,7 +34,7 @@ def mock_app_with_nested_location():
         "app_size": "Major",
         "area_id": 323,
         "area_name": "Newham2",
-        "link": "https://example.com/2001",
+        "url": "https://example.com/2001",
         "location": {"geometry": {"coordinates": [234.567, 890.123]}},
         "location_x": 234.567,
         "location_y": 890.123,
@@ -55,7 +55,7 @@ def mock_app_missing_location():
         "app_size": None,
         "area_id": 305,
         "area_name": "Test Area",
-        "link": "https://example.com/3001",
+        "url": "https://example.com/3001",
         "location_x": None,
         "location_y": None,
         "other_fields": {
