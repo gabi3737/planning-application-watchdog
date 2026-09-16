@@ -1,3 +1,5 @@
+"""Functions to load AWS data for dashboard."""
+
 import os
 import logging
 import pandas as pd
@@ -40,7 +42,7 @@ def load_application_data(session: boto3.Session) -> pd.DataFrame:
         response = table.scan()
         items = response.get("Items", [])
 
-        # Handle DynamoDB pagination for scans exceeding 1MB
+        # Ensures all data from DynamoDB is retrieved for scans exceeding 1MB
         while "LastEvaluatedKey" in response:
             response = table.scan(
                 ExclusiveStartKey=response["LastEvaluatedKey"])
@@ -79,7 +81,7 @@ def load_application_data(session: boto3.Session) -> pd.DataFrame:
 
 
 def set_s3_client(session: boto3.Session) -> boto3.client:
-    """Sets up the S3 client using credentials from environment variables."""
+    """Sets up the S3 client using credentials from the provided boto3 session."""
     s3 = session.client(
         "s3")
     return s3
