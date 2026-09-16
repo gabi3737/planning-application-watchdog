@@ -115,7 +115,7 @@ def load_csv_file(table, csv_path: Path, no_db: bool = False) -> Tuple[int, int,
                     # Check if record already exists
                     existing = table.get_item(Key=keys)
                     is_update = "Item" in existing
-                    
+
                     # Build update expression to set all attributes
                     # DynamoDB reserved keywords need to be mapped using ExpressionAttributeNames
                     update_parts = []
@@ -144,7 +144,7 @@ def load_csv_file(table, csv_path: Path, no_db: bool = False) -> Tuple[int, int,
                             ExpressionAttributeValues={
                                 ":pk": keys[PARTITION_KEY]}
                         )
-                    
+
                     # Track whether it was a create or update
                     uid = keys.get(SORT_KEY, "unknown")
                     if is_update:
@@ -157,7 +157,8 @@ def load_csv_file(table, csv_path: Path, no_db: bool = False) -> Tuple[int, int,
                 logger.error(f"Failed to load row {idx + 1}: {e}")
                 failed_count += 1
 
-        logger.info(f"  {csv_path.name}: {created_count} uploaded, {updated_count} updated, {failed_count} failed")
+        logger.info(
+            f"  {csv_path.name}: {created_count} uploaded, {updated_count} updated, {failed_count} failed")
         return created_count, updated_count, failed_count
 
     except FileNotFoundError:
@@ -221,7 +222,8 @@ def main(no_db: bool = False):
         if results:
             logger.info("\nLoad Summary by Area:")
             for filename, (created, updated, failed) in results.items():
-                logger.info(f"  {filename}: {created} uploaded, {updated} updated, {failed} failed")
+                logger.info(
+                    f"  {filename}: {created} uploaded, {updated} updated, {failed} failed")
         else:
             logger.warning("No files were processed")
 
