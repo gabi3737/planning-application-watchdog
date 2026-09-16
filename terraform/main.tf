@@ -37,7 +37,20 @@ resource "aws_dynamodb_table" "c25_planning_user_db" {
 
 }
 
-# S3 terraform here:
+# S3 bucket:
+
+resource "aws_s3_bucket" "c25_planning_files_bucket" {
+  bucket = "c25-planning-files-bucket"
+}
+
+resource "aws_s3_bucket_public_access_block" "c25_planning_files_bucket" {
+  bucket = aws_s3_bucket.c25_planning_files_bucket.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
 
 # ETL Lambda function and roles/policies
 
@@ -74,7 +87,7 @@ resource "aws_iam_role_policy" "lambda_etl_policy" {
         "s3:DeleteObject"
       ]
 
-      Resource = "" # future s3 resource here
+      Resource = "${aws_s3_bucket.c25_planning_files_bucket.arn}/*"
       },
       {
         Effect = "Allow"
