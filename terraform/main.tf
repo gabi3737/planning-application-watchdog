@@ -4,7 +4,7 @@ resource "aws_dynamodb_table" "c25_planning_data_db" {
   name         = "c25-planning-data-db"
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "area"
-  range_key    = "UID"
+  range_key    = "uid"
 
   attribute {
     name = "area"
@@ -12,7 +12,7 @@ resource "aws_dynamodb_table" "c25_planning_data_db" {
   }
 
   attribute {
-    name = "UID"
+    name = "uid"
     type = "S"
   }
 
