@@ -36,7 +36,9 @@ FAKE_APPLICATIONS = [{
 @st.cache_data
 def get_sites(latitude: float, longitude: float, radius: int) -> list:
     """Fetches heritage sites within the specified radius of the given latitude and longitude."""
-    url = f"https://services-eu1.arcgis.com/ZOdPfBS3aqqDYPUQ/arcgis/rest/services/National_Heritage_List_for_England_NHLE_v02_VIEW/FeatureServer/0/query?f=json&geometry={longitude},{latitude}&geometryType=esriGeometryPoint&where=1%3D1&outSR=4326&inSR=4326&distance={radius}&outFields=Name,Grade,Hyperlink&returnGeometry=true"
+    base_url = "https://services-eu1.arcgis.com/ZOdPfBS3aqqDYPUQ/arcgis/rest/services/National_Heritage_List_for_England_NHLE_v02_VIEW/FeatureServer/0/"
+    query = f"query?f=json&geometry={longitude},{latitude}&geometryType=esriGeometryPoint&where=1%3D1&outSR=4326&inSR=4326&distance={radius}&outFields=Name,Grade,Hyperlink&returnGeometry=true"
+    url = base_url + query
     try:
         heritage_sites_data = requests.get(
             impersonate="chrome124", url=url).json()
@@ -44,7 +46,7 @@ def get_sites(latitude: float, longitude: float, radius: int) -> list:
         logger.error(f"HTTP Error fetching heritage sites: {err}")
         return []
     if "features" not in heritage_sites_data:
-        logger.error("No 'features' key in heritage sites data")
+        logger.error("Invalid data format received for heritage sites.")
         return []
     if len(heritage_sites_data["features"]) == 0:
         logger.info("No heritage sites found within the specified radius")
@@ -52,41 +54,36 @@ def get_sites(latitude: float, longitude: float, radius: int) -> list:
     return heritage_sites_data["features"]
 
 
+@st.cache_data
+def get_conservation_areas(latitude: float, longitude: float, radius: int) -> list:
+    """Fetches conservation areas within the specified radius of the given latitude and longitude."""
+    base_url = "https://services-eu1.arcgis.com/ZOdPfBS3aqqDYPUQ/arcgis/rest/services/Conservation_Areas/FeatureServer/0/"
+    query = f"query?f=geojson&geometry={longitude},{latitude}&geometryType=esriGeometryPoint&inSR=4326&outSR=4326&distance={radius}&where=1%3D1&outFields=NAME&returnGeometry=true"
+    url = base_url + query
+    try:
+        conservation_areas_data = requests.get(
+            impersonate="chrome124", url=url).json()
+    except HTTPError as err:
+        logger.error(f"HTTP Error fetching conservation areas: {err}")
+        return []
+    if "features" not in conservation_areas_data:
+        logger.error("Invalid data format received for conservation areas.")
+        return []
+    if len(conservation_areas_data["features"]) == 0:
+        logger.info("No conservation areas found within the specified radius")
+        return []
+    return conservation_areas_data["features"]
+
+
 def select_parameters() -> tuple[float, float, int]:
     """Displays sidebar inputs for latitude, longitude, and radius."""
+    st.sidebar.header("📊 Visualization Controls")
     latitude = st.sidebar.number_input(
-        "Latitude", value=51.5074, step=0.0001, format="%.5f")
+        "Latitude", value=51.54, step=0.0001, format="%.5f")
     longitude = st.sidebar.number_input(
-        "Longitude", value=-0.1278, step=0.0001, format="%.5f")
+        "Longitude", value=0.05, step=0.0001, format="%.5f")
     radius = st.sidebar.number_input("Radius (m)", value=100)
     return latitude, longitude, radius
-
-
-def create_map(latitude: float, longitude: float, radius: int,
-               fake_applications: list, sites: list) -> folium.Map:
-    """Creates and populates the Map with planning applications and heritage sites."""
-    m = folium.Map(location=[latitude, longitude], zoom_start=12)
-
-    folium.Marker(
-        location=[latitude, longitude],
-        popup=f"Center: ({latitude}, {longitude})",
-        icon=folium.Icon(color="red", icon="info-sign")
-    ).add_to(m)
-
-    m = add_applications_to_map(
-        m, latitude, longitude, radius, fake_applications)
-
-    m = add_sites_to_map(m, sites)
-
-    folium.Circle(
-        location=[latitude, longitude],
-        radius=radius,
-        color="blue",
-        fill=False,
-        fill_opacity=0.1
-    ).add_to(m)
-
-    return m
 
 
 def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -131,6 +128,50 @@ def add_sites_to_map(m: folium.Map, sites: list) -> folium.Map:
     return m
 
 
+def add_areas_to_map(m: folium.Map, areas: list) -> folium.Map:
+    """Adds conservation areas to the map."""
+    for area in areas:
+        folium.Polygon(
+            locations=[[point[1], point[0]]
+                       for point in area["geometry"]["coordinates"][0]],
+            popup=f"""Conservation Area: {area['properties']['NAME']}""",
+            icon=folium.Icon(color="purple", icon="tree"),
+            color="green",
+            fill=True,
+            fill_color="green"
+        ).add_to(m)
+    return m
+
+
+def create_map(latitude: float, longitude: float, radius: int,
+               fake_applications: list, sites: list, areas: list) -> folium.Map:
+    """Creates and populates the Map with planning applications and heritage sites."""
+    m = folium.Map(location=[latitude, longitude], zoom_start=12)
+
+    folium.Marker(
+        location=[latitude, longitude],
+        popup=f"Center: ({latitude}, {longitude})",
+        icon=folium.Icon(color="red", icon="info-sign")
+    ).add_to(m)
+
+    m = add_applications_to_map(
+        m, latitude, longitude, radius, fake_applications)
+
+    m = add_sites_to_map(m, sites)
+    areas = get_conservation_areas(latitude, longitude, radius)
+    m = add_areas_to_map(m, areas)
+
+    folium.Circle(
+        location=[latitude, longitude],
+        radius=radius,
+        color="blue",
+        fill=False,
+        fill_opacity=0.1
+    ).add_to(m)
+
+    return m
+
+
 if __name__ == "__main__":
     st.title("Planning Application Watchdog")
     st.set_page_config(
@@ -151,8 +192,9 @@ if __name__ == "__main__":
     lat, lon, r = select_parameters()
 
     sites = get_sites(lat, lon, r)
+    areas = get_conservation_areas(lat, lon, r)
 
-    m = create_map(lat, lon, r, FAKE_APPLICATIONS, sites)
+    m = create_map(lat, lon, r, FAKE_APPLICATIONS, sites, areas)
 
     # Display the map in Streamlit
     map_data = st_folium(m, width=700, height=500)
