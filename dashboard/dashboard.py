@@ -1,9 +1,17 @@
+"""GeoSpatial Analytical Dashboard for the Planning Application Watchdog."""
+import logging
 import streamlit as st
 import folium
 from streamlit_folium import st_folium
 from curl_cffi import requests
-import time
 import math
+from requests.exceptions import HTTPError
+
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s - %(levelname)s - %(message)s",
+                    datefmt="%Y-%m-%d %H:%M:%S")
+
+logger = logging.getLogger(__name__)
 
 fake_applications = [{
     "name": "1",
@@ -20,6 +28,62 @@ fake_applications = [{
     "latitude": 51.507,
     "longitude": -0.125
 }]
+
+
+@st.cache_data
+def get_sites(latitude: float, longitude: float, radius: int) -> list:
+    """Fetches heritage sites within the specified radius of the given latitude and longitude."""
+    url = f"https://services-eu1.arcgis.com/ZOdPfBS3aqqDYPUQ/arcgis/rest/services/National_Heritage_List_for_England_NHLE_v02_VIEW/FeatureServer/0/query?f=json&geometry={longitude},{latitude}&geometryType=esriGeometryPoint&where=1%3D1&outSR=4326&inSR=4326&distance={radius}&outFields=Name,Grade,Hyperlink&returnGeometry=true"
+    try:
+        heritage_sites_data = requests.get(
+            impersonate="chrome124", url=url).json()
+    except HTTPError as err:
+        logger.error(f"HTTP Error fetching heritage sites: {err}")
+        return []
+    if "features" not in heritage_sites_data:
+        logger.error("No 'features' key in heritage sites data")
+        return []
+    if len(heritage_sites_data["features"]) == 0:
+        logger.info("No heritage sites found within the specified radius")
+        return []
+    return heritage_sites_data["features"]
+
+
+def select_parameters() -> tuple[float, float, int]:
+    """Displays sidebar inputs for latitude, longitude, and radius, and returns the selected values."""
+    latitude = st.sidebar.number_input(
+        "Latitude", value=51.5074, step=0.0001, format="%.5f")
+    longitude = st.sidebar.number_input(
+        "Longitude", value=-0.1278, step=0.0001, format="%.5f")
+    radius = st.sidebar.number_input("Radius (m)", value=100)
+    return latitude, longitude, radius
+
+
+def create_map(latitude: float, longitude: float, radius: int,
+               fake_applications: list, sites: list) -> folium.Map:
+    """Creates and populates the Map with planning applications and heritage sites."""
+    m = folium.Map(location=[latitude, longitude], zoom_start=12)
+
+    folium.Marker(
+        location=[latitude, longitude],
+        popup=f"Center: ({latitude}, {longitude})",
+        icon=folium.Icon(color="red", icon="info-sign")
+    ).add_to(m)
+
+    m = add_applications_to_map(
+        m, latitude, longitude, radius, fake_applications)
+
+    m = add_sites_to_map(m, sites)
+
+    folium.Circle(
+        location=[latitude, longitude],
+        radius=radius,
+        color="blue",
+        fill=False,
+        fill_opacity=0.1
+    ).add_to(m)
+
+    return m
 
 
 def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -50,6 +114,7 @@ def add_applications_to_map(m: folium.Map, latitude: float, longitude: float, ra
 
 
 def add_sites_to_map(m: folium.Map, sites: list) -> folium.Map:
+    """Adds heritage sites to the map."""
     for site in sites:
         folium.Marker(
             location=[site["geometry"]["points"]
@@ -58,51 +123,6 @@ def add_sites_to_map(m: folium.Map, sites: list) -> folium.Map:
             icon=folium.Icon(color="blue", icon="tower")
         ).add_to(m)
     return m
-
-
-def create_map(latitude: float, longitude: float, radius: int,
-               fake_applications: list, sites: list) -> folium.Map:
-    """Creates and populates the Map with planning applications and heritage sites."""
-    m = folium.Map(location=[latitude, longitude], zoom_start=10)
-
-    folium.Marker(
-        location=[latitude, longitude],
-        popup=f"Center: ({latitude}, {longitude})",
-        icon=folium.Icon(color="red", icon="info-sign")
-    ).add_to(m)
-
-    m = add_applications_to_map(
-        m, latitude, longitude, radius, fake_applications)
-
-    m = add_sites_to_map(m, sites)
-
-    folium.Circle(
-        location=[latitude, longitude],
-        radius=radius,
-        color="blue",
-        fill=False,
-        fill_opacity=0.1
-    ).add_to(m)
-
-    return m
-
-
-@st.cache_data
-def get_sites(latitude: float, longitude: float, radius: int) -> list:
-    """Fetches heritage sites within the specified radius of the given latitude and longitude."""
-    url = f"https://services-eu1.arcgis.com/ZOdPfBS3aqqDYPUQ/arcgis/rest/services/National_Heritage_List_for_England_NHLE_v02_VIEW/FeatureServer/0/query?f=json&geometry={longitude},{latitude}&geometryType=esriGeometryPoint&where=1%3D1&outSR=4326&inSR=4326&distance={radius}&outFields=Name,Grade,Hyperlink&returnGeometry=true"
-    heritage_sites_data = requests.get(impersonate="chrome124", url=url).json()
-    return heritage_sites_data["features"]
-
-
-def select_parameters() -> tuple[float, float, int]:
-    """Displays sidebar inputs for latitude, longitude, and radius, and returns the selected values."""
-    latitude = st.sidebar.number_input(
-        "Latitude", value=51.5074, step=0.0001, format="%.5f")
-    longitude = st.sidebar.number_input(
-        "Longitude", value=-0.1278, step=0.0001, format="%.5f")
-    radius = st.sidebar.number_input("Radius (m)", value=100)
-    return latitude, longitude, radius
 
 
 if __name__ == "__main__":
