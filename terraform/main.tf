@@ -1,7 +1,7 @@
 # DynamoDB Tables
 
 resource "aws_dynamodb_table" "c25-planning-data-db" {
-  name         = "c25-planning-db"
+  name         = "c25-planning-data-db"
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "area"
   range_key    = "UID"
