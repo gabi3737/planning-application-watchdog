@@ -7,3 +7,5 @@ bs4
 certifi
 curl-cffi
 pylint
+boto3
+

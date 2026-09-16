@@ -83,6 +83,36 @@ Validation report showing:
 - Required field violations
 - Coordinate boundary violations
 
+### load.py
+
+Loads transformed CSV data from `data/` directory into AWS DynamoDB table `c25-planning-data-db`.
+
+**Usage:**
+
+Load all CSV files to DynamoDB:
+```bash
+python3 load.py
+```
+
+Dry-run mode (verify logic without writing):
+```bash
+python3 load.py --no-db
+```
+
+**Options:**
+- `--dry-run` — Simulate loading without writing to DynamoDB (optional)
+
+**Requirements:**
+- AWS credentials configured (via environment variables, credentials file, or IAM role)
+- DynamoDB table `c25-planning-data-db` exists with:
+  - Partition key: `area` (string)
+  - Sort key: `uid` (string)
+
+**Output:**
+- Per-file loading summary (record count, errors)
+- Total records loaded across all files
+- Error logs for any failed rows
+
 ## Testing
 
 ```bash
