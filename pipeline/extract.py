@@ -7,20 +7,33 @@ Usage:
 
 import argparse
 import logging
-import requests
+from curl_cffi import requests
 import pandas as pd
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Tuple, Optional
 from pathlib import Path
+import time
+import os
+from urllib.parse import urljoin
+from bs4 import BeautifulSoup
+import certifi
+from requests.exceptions import HTTPError
 
 # Configuration
 API_BASE_URL = "https://www.planit.org.uk/api/applics/json"
-AREA_CODES = {318: "area_318", 323: "area_323", 305: "area_305"}
-FIELDS = ["address", "app_size", "app_state", "app_type", "area_id", 
+AREA_CODES = {318: "area_318", 323: "area_323", 304: "area_304"}
+FIELDS = ["address", "app_size", "app_state", "app_type", "area_id",
           "area_name", "location_x", "location_y", "postcode", "start_date", "uid", "url"]
 DATA_DIR = Path(__file__).parent / "data"
+DOCUMENTS_DIR = Path(__file__).parent / "documents"
 
-logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "Accept": "application/pdf"
+}
+
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 
@@ -35,27 +48,125 @@ def flatten_location(location: Optional[Dict]) -> Tuple[Optional[float], Optiona
     """Extract x, y from location object."""
     if not location or not isinstance(location, dict):
         return None, None
-    
+
     if "x" in location and "y" in location:
         return location.get("x"), location.get("y")
-    
+
     if "coordinates" in location:
         coords = location["coordinates"]
         if isinstance(coords, (list, tuple)) and len(coords) >= 2:
             return coords[0], coords[1]
-    
+
     if "geometry" in location:
         coords = location.get("geometry", {}).get("coordinates", [])
         if len(coords) >= 2:
             return coords[0], coords[1]
-    
+
     return None, None
+
+
+def create_session() -> requests.Session:
+    """Create and return a new HTTP session with browser impersonation."""
+    session = requests.Session(impersonate="chrome124")
+    return session
+
+
+def convert_url_to_documents_url(url: str) -> str:
+    """Convert a planning application summary URL to its documents URL."""
+    if "activeTab=summary" in url:
+        return url.replace("activeTab=summary", "activeTab=documents")
+    return url
+
+
+def load_webpage(url: str, session: requests.Session) -> Optional[BeautifulSoup]:
+    """Load the HTML content of a URL and return a BeautifulSoup object."""
+    try:
+        response = session.get(url, allow_redirects=True,
+                               timeout=(5, 10), verify=certifi.where())
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, "html.parser")
+        return soup
+    except HTTPError as e:
+        logger.error(f"HTTP error loading webpage {url}: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Error loading webpage {url}: {e}")
+        return None
+
+
+def find_pdf_urls(soup: BeautifulSoup, url: str) -> List[str]:
+    """Find and return all PDF URLs from the given BeautifulSoup object."""
+    urls = []
+    for link in soup.find_all("a", href=True):
+        if link["href"].lower().endswith(".pdf"):
+            full_url = urljoin(url, link["href"])
+            urls.append(full_url)
+    return urls
+
+
+def get_pdf(url: str, session: requests.Session) -> Optional[bytes]:
+    """Download a PDF from the given URL and return its content."""
+    try:
+        response = session.get(url, allow_redirects=True, timeout=(
+            5, 10), verify=certifi.where(), headers=HEADERS)
+        response.raise_for_status()
+        return response.content
+    except Exception as e:
+        logger.error(f"Error downloading PDF from {url}: {e}")
+        return None
+
+
+def save_pdf(content: bytes, filename: str) -> bool:
+    """Save PDF content to file. Returns True if successful."""
+    try:
+        DOCUMENTS_DIR.mkdir(parents=True, exist_ok=True)
+        # Sanitize filename to remove any path separators
+        safe_filename = filename.replace("/", "_")
+        filepath = DOCUMENTS_DIR / safe_filename
+        with open(filepath, "wb") as f:
+            f.write(content)
+        logger.info(f"Saved PDF: {filepath}")
+        return True
+    except Exception as e:
+        logger.error(f"Error saving PDF {filename}: {e}")
+        return False
+
+
+def download_documents(app_url: str, session: requests.Session, uid: str) -> int:
+    """Download all PDFs for a planning application. Returns count of saved PDFs."""
+    if not app_url:
+        return 0
+
+    try:
+        docs_url = convert_url_to_documents_url(app_url)
+        soup = load_webpage(docs_url, session)
+        if not soup:
+            return 0
+
+        pdf_urls = find_pdf_urls(soup, docs_url)
+        if not pdf_urls:
+            logger.debug(f"No PDFs found for {uid}")
+            return 0
+
+        saved_count = 0
+        for pdf_url in pdf_urls:
+            pdf_content = get_pdf(pdf_url, session)
+            if pdf_content:
+                filename = f"{uid}_{pdf_url.split('/')[-1]}"
+                if save_pdf(pdf_content, filename):
+                    saved_count += 1
+            time.sleep(0.5)  # Small delay between PDF downloads
+
+        return saved_count
+    except Exception as e:
+        logger.error(f"Error downloading documents for {uid}: {e}")
+        return 0
 
 
 def extract_from_record(app: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Extract required fields from application record."""
     other = app.get("other_fields", {})
-    
+
     extracted = {
         "uid": app.get("name"),  # e.g., "Newham/26/01919/CLP"
         "address": app.get("address"),
@@ -66,11 +177,11 @@ def extract_from_record(app: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "area_id": app.get("area_id"),
         "area_name": app.get("area_name"),
         "start_date": other.get("date_received") or app.get("last_changed", "").split("T")[0],
-        "url": app.get("link"),
+        "url": app.get("url"),
         "location_x": app.get("location_x"),
         "location_y": app.get("location_y"),
     }
-    
+
     return extracted if any(extracted.values()) else None
 
 
@@ -78,7 +189,17 @@ def fetch_applications(auth_code: int, start_date: str, end_date: str) -> List[D
     """Fetch all applications for a given area and date range."""
     all_records = []
     page = 1
-    
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "Accept": "application/json",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "DNT": "1",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+    }
+
     while True:
         try:
             params = {
@@ -88,24 +209,31 @@ def fetch_applications(auth_code: int, start_date: str, end_date: str) -> List[D
                 "pg_sz": 10,
                 "page": page,
             }
-            
-            response = requests.get(API_BASE_URL, params=params, timeout=10)
+
+            # Use curl_cffi with browser impersonation to avoid being blocked
+            response = requests.get(
+                API_BASE_URL, params=params, headers=headers, timeout=10, impersonate="chrome101")
             response.raise_for_status()
             data = response.json()
-            
+
             # API returns dict with 'records' key
-            records = data.get("records", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+            records = data.get("records", []) if isinstance(
+                data, dict) else (data if isinstance(data, list) else [])
             if not records:
                 break
-            
+
             all_records.extend(records)
-            logger.info(f"Auth {auth_code}: Fetched {len(records)} records from page {page}")
+            logger.info(
+                f"Auth {auth_code}: Fetched {len(records)} records from page {page}")
             page += 1
-            
+
+            # Add delay between requests to avoid rate limiting
+            time.sleep(1)
+
         except Exception as e:
             logger.error(f"Auth {auth_code}: Error fetching page {page}: {e}")
             break
-    
+
     return all_records
 
 
@@ -114,44 +242,56 @@ def save_to_csv(records: List[Dict], area_name: str) -> Path:
     if not records:
         logger.warning(f"No records for {area_name}")
         return None
-    
+
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     csv_path = DATA_DIR / f"{area_name}.csv"
-    
+
     df = pd.DataFrame(records)
     df.to_csv(csv_path, index=False)
     logger.info(f"Saved {len(records)} records to {csv_path}")
-    
+
     return csv_path
 
 
 def main(start_date: str = None, end_date: str = None):
-    """Extract planning applications for all areas."""
+    """Extract planning applications for all areas and download PDFs."""
     if not start_date or not end_date:
         start_date, end_date = calculate_date_range()
-    
+
     logger.info(f"Extracting data for {start_date} to {end_date}")
-    
+    session = create_session()
+
     for auth_code, area_name in AREA_CODES.items():
         logger.info(f"Processing {area_name} (auth={auth_code})")
-        
+
         raw = fetch_applications(auth_code, start_date, end_date)
         logger.info(f"  Raw records fetched: {len(raw)}")
-        
+
         extracted = [extract_from_record(app) for app in raw]
         extracted = [r for r in extracted if r is not None]
         logger.info(f"  Records extracted: {len(extracted)}")
-        
+
         if extracted:
             save_to_csv(extracted, area_name)
+
+            # Download PDFs for each application
+            total_pdfs = 0
+            for record in extracted:
+                if record.get("url"):
+                    pdfs_saved = download_documents(
+                        record["url"], session, record["uid"])
+                    total_pdfs += pdfs_saved
+
+            logger.info(f"  PDFs downloaded for {area_name}: {total_pdfs}")
         else:
             logger.warning(f"No data extracted for {area_name}")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Extract planning applications")
+    parser = argparse.ArgumentParser(
+        description="Extract planning applications")
     parser.add_argument("--start-date", help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end-date", help="End date (YYYY-MM-DD)")
     args = parser.parse_args()
-    
+
     main(args.start_date, args.end_date)
