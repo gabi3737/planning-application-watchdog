@@ -255,7 +255,7 @@ def save_to_csv(records: List[Dict], area_name: str) -> Path:
 
 def main(start_date: str = None, end_date: str = None, save_pdf: bool = False):
     """Extract planning applications for all areas.
-    
+
     Args:
         start_date: Start date (YYYY-MM-DD) or None for last 7 days
         end_date: End date (YYYY-MM-DD) or None for last 7 days
@@ -294,6 +294,7 @@ def main(start_date: str = None, end_date: str = None, save_pdf: bool = False):
                         total_pdfs += pdfs_saved
 
                 logger.info(f"  PDFs downloaded for {area_name}: {total_pdfs}")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
