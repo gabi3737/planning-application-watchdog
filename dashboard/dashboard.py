@@ -1,11 +1,14 @@
 """GeoSpatial Analytical Dashboard for the Planning Application Watchdog."""
 import logging
+import math
 import streamlit as st
 import folium
 from streamlit_folium import st_folium
 from curl_cffi import requests
-import math
 from requests.exceptions import HTTPError
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -13,7 +16,7 @@ logging.basicConfig(level=logging.INFO,
 
 logger = logging.getLogger(__name__)
 
-fake_applications = [{
+FAKE_APPLICATIONS = [{
     "name": "1",
     "latitude": 51.509,
     "longitude": -0.128
@@ -50,7 +53,7 @@ def get_sites(latitude: float, longitude: float, radius: int) -> list:
 
 
 def select_parameters() -> tuple[float, float, int]:
-    """Displays sidebar inputs for latitude, longitude, and radius, and returns the selected values."""
+    """Displays sidebar inputs for latitude, longitude, and radius."""
     latitude = st.sidebar.number_input(
         "Latitude", value=51.5074, step=0.0001, format="%.5f")
     longitude = st.sidebar.number_input(
@@ -100,7 +103,8 @@ def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
     return R * c
 
 
-def add_applications_to_map(m: folium.Map, latitude: float, longitude: float, radius: int, fake_applications: list) -> None:
+def add_applications_to_map(m: folium.Map, latitude: float, longitude: float,
+                            radius: int, fake_applications: list) -> None:
     for app in fake_applications:
         distance = calculate_distance(
             latitude, longitude, app["latitude"], app["longitude"])
@@ -119,7 +123,9 @@ def add_sites_to_map(m: folium.Map, sites: list) -> folium.Map:
         folium.Marker(
             location=[site["geometry"]["points"]
                       [0][1], site["geometry"]["points"][0][0]],
-            popup=f"Heritage Site {site['attributes']['Name']}: Grade {site['attributes']['Grade']}, Link: {site['attributes']['hyperlink']}",
+            popup=f"""Heritage Site: {site['attributes']['Name']}, 
+            Grade: {site['attributes']['Grade']}, 
+            Link: {site['attributes']['hyperlink']}""",
             icon=folium.Icon(color="blue", icon="tower")
         ).add_to(m)
     return m
@@ -133,19 +139,20 @@ if __name__ == "__main__":
         layout="wide",
     )
 
-    # Add some introductory text
-    st.write("Welcome to the Planning Application Watchdog. Use the map below to explore planning applications in your area.")
-    st.write("You can zoom in and out of the map and click on markers to get more information about each planning application.")
-    st.write("Use the filters on the sidebar to narrow down the planning applications displayed on the map.")
+    st.write("Welcome to the Planning Application Watchdog. "
+             "Use the map below to explore planning applications in your area.")
+    st.write("You can zoom in and out of the map and click on markers to get more information"
+             " about each planning application.")
+    st.write("Use the filters on the sidebar to narrow down the planning applications "
+             "displayed on the map.")
     st.write(
         "Click on the markers to view detailed information about each location.")
 
-    # Input latitude and longitude for the map center
-    latitude, longitude, radius = select_parameters()
+    lat, lon, r = select_parameters()
 
-    sites = get_sites(latitude, longitude, radius)
+    sites = get_sites(lat, lon, r)
 
-    m = create_map(latitude, longitude, radius, fake_applications, sites)
+    m = create_map(lat, lon, r, FAKE_APPLICATIONS, sites)
 
     # Display the map in Streamlit
     map_data = st_folium(m, width=700, height=500)

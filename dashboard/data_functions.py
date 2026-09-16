@@ -6,6 +6,9 @@ import pandas as pd
 import streamlit as st
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -33,7 +36,6 @@ def load_application_data(session: boto3.Session) -> pd.DataFrame:
     """Load planning application data from DynamoDB."""
     table_name = os.getenv(
         "PLANNING_TABLE_NAME", "c25-planning-data-db")
-    region = os.getenv("AWS_REGION", "eu-west-2")
 
     try:
         dynamodb = session.resource("dynamodb")

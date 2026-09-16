@@ -4,3 +4,6 @@ streamlit-folium
 curl-cffi
 boto3
 pandas
+pytest
+pylint
+python-dotenv
