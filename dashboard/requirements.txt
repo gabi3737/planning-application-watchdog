@@ -1,0 +1,6 @@
+streamlit
+folium
+streamlit-folium
+curl-cffi
+boto3
+pandas
