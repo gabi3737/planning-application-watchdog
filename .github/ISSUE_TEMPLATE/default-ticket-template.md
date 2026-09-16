@@ -2,7 +2,7 @@
 name: Default Ticket Template
 about: To help speed up creation of tickets
 title: Ticket
-labels: ''
+labels: enhancement
 assignees: ''
 type: Feature
 
