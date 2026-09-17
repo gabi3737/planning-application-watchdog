@@ -145,7 +145,7 @@ def add_areas_to_map(m: folium.Map, areas: list) -> folium.Map:
 def create_map(latitude: float, longitude: float, radius: int,
                fake_applications: list, sites: list, areas: list) -> folium.Map:
     """Creates and populates the Map with planning applications and heritage sites."""
-    m = folium.Map(location=[latitude, longitude], zoom_start=12)
+    m = folium.Map(location=[latitude, longitude], zoom_start=18)
 
     folium.Marker(
         location=[latitude, longitude],
