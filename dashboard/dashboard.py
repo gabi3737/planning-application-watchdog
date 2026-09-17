@@ -8,6 +8,8 @@ from curl_cffi import requests
 from requests.exceptions import HTTPError
 from dotenv import load_dotenv
 
+from data_functions import calculate_distance, get_sites, get_conservation_areas
+
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO,
@@ -33,48 +35,6 @@ FAKE_APPLICATIONS = [{
 }]
 
 
-@st.cache_data
-def get_sites(latitude: float, longitude: float, radius: int) -> list:
-    """Fetches heritage sites within the specified radius of the given latitude and longitude."""
-    base_url = "https://services-eu1.arcgis.com/ZOdPfBS3aqqDYPUQ/arcgis/rest/services/National_Heritage_List_for_England_NHLE_v02_VIEW/FeatureServer/0/"
-    query = f"query?f=json&geometry={longitude},{latitude}&geometryType=esriGeometryPoint&where=1%3D1&outSR=4326&inSR=4326&distance={radius}&outFields=Name,Grade,Hyperlink&returnGeometry=true"
-    url = base_url + query
-    try:
-        heritage_sites_data = requests.get(
-            impersonate="chrome124", url=url).json()
-    except HTTPError as err:
-        logger.error(f"HTTP Error fetching heritage sites: {err}")
-        return []
-    if "features" not in heritage_sites_data:
-        logger.error("Invalid data format received for heritage sites.")
-        return []
-    if len(heritage_sites_data["features"]) == 0:
-        logger.info("No heritage sites found within the specified radius")
-        return []
-    return heritage_sites_data["features"]
-
-
-@st.cache_data
-def get_conservation_areas(latitude: float, longitude: float, radius: int) -> list:
-    """Fetches conservation areas within the specified radius of the given latitude and longitude."""
-    base_url = "https://services-eu1.arcgis.com/ZOdPfBS3aqqDYPUQ/arcgis/rest/services/Conservation_Areas/FeatureServer/0/"
-    query = f"query?f=geojson&geometry={longitude},{latitude}&geometryType=esriGeometryPoint&inSR=4326&outSR=4326&distance={radius}&where=1%3D1&outFields=NAME&returnGeometry=true"
-    url = base_url + query
-    try:
-        conservation_areas_data = requests.get(
-            impersonate="chrome124", url=url).json()
-    except HTTPError as err:
-        logger.error(f"HTTP Error fetching conservation areas: {err}")
-        return []
-    if "features" not in conservation_areas_data:
-        logger.error("Invalid data format received for conservation areas.")
-        return []
-    if len(conservation_areas_data["features"]) == 0:
-        logger.info("No conservation areas found within the specified radius")
-        return []
-    return conservation_areas_data["features"]
-
-
 # def select_parameters() -> tuple[float, float, int]:
 #     """Displays sidebar inputs for latitude, longitude, and radius."""
 #     st.sidebar.header("📊 Visualization Controls")
@@ -84,20 +44,6 @@ def get_conservation_areas(latitude: float, longitude: float, radius: int) -> li
 #         "Longitude", value=0.05, step=0.0001, format="%.5f")
 #     radius = st.sidebar.number_input("Radius (m)", value=100)
 #     return latitude, longitude, radius
-
-
-def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Calculates the distance in meters between two coordinates using the Haversine formula."""
-    R = 6371000  # Earth's radius in meters
-    phi1 = math.radians(lat1)
-    phi2 = math.radians(lat2)
-    diff_phi = math.radians(lat2 - lat1)
-    diff_long = math.radians(lon2 - lon1)
-
-    a = math.sin(diff_phi/2)**2 + math.cos(phi1) * \
-        math.cos(phi2) * math.sin(diff_long/2)**2
-    c = 2 * math.asin(math.sqrt(a))
-    return R * c
 
 
 def add_applications_to_map(m: folium.Map, latitude: float, longitude: float,
