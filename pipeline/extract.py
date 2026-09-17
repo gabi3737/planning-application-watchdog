@@ -28,7 +28,7 @@ DATA_DIR = Path(__file__).parent / "data"
 DOCUMENTS_DIR = Path(__file__).parent / "documents"
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (+https://github.com/gabi3737; trainee.gabriela.prefit@sigma-labs.co.uk)",
     "Accept": "application/pdf"
 }
 
@@ -172,12 +172,13 @@ def download_documents(app_url: str, session: requests.Session, uid: str) -> boo
         selected_pdf_url = None
         selected_pdf_text = None
 
-        for pdf_url, link_text in pdf_links:
-            link_text_lower = link_text.lower()
-            if "form" in link_text_lower or "applicationform" in link_text_lower:
+        for pdf_url, pdf_text in pdf_links:
+            logger.debug(
+                f"    ✓ Checking PDF link: URL: {pdf_url}")
+            if "form" in pdf_url.lower() or "applicationform" in pdf_url.lower():
                 selected_pdf_url = pdf_url
-                selected_pdf_text = link_text
-                logger.info(f"    ✓ Found form PDF: {link_text}")
+                selected_pdf_text = pdf_text
+                logger.info(f"    ✓ Found form PDF: {pdf_url}")
                 break
 
         # Fall back to first PDF if no form found
@@ -245,7 +246,7 @@ def fetch_applications(auth_code: int, start_date: str, end_date: str) -> List[D
         "Accept-Encoding": "gzip, deflate, br",
         "DNT": "1",
         "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1",
+        "Upgrade-Insecure-Requests": "1"
     }
 
     while True:
@@ -276,7 +277,7 @@ def fetch_applications(auth_code: int, start_date: str, end_date: str) -> List[D
             page += 1
 
             # Add delay between requests to avoid rate limiting
-            time.sleep(1)
+            time.sleep(60)
 
         except Exception as e:
             logger.error(f"Auth {auth_code}: Error fetching page {page}: {e}")
@@ -348,7 +349,7 @@ def main(start_date: str = None, end_date: str = None, save_pdf: bool = False):
                         else:
                             forms_failed += 1
                         # Delay between each application's download to avoid rate limiting
-                        time.sleep(2)
+                        time.sleep(5)
                     else:
                         logger.debug(
                             f"  [{i}/{len(extracted)}] Skipping {record['uid']} (no URL)")
