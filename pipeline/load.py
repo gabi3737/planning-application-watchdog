@@ -14,6 +14,7 @@ Usage:
 
 import argparse
 import logging
+import os
 import boto3
 import pandas as pd
 from pathlib import Path
@@ -46,7 +47,8 @@ logger = logging.getLogger(__name__)
 def initialize_dynamodb():
     """Initialize DynamoDB resource and client."""
     try:
-        dynamodb = boto3.resource('dynamodb')
+        region = os.getenv('AWS_REGION', 'eu-west-2')
+        dynamodb = boto3.resource('dynamodb', region_name=region)
         table = dynamodb.Table(TABLE_NAME)
         # Verify table exists
         table.load()
@@ -60,7 +62,8 @@ def initialize_dynamodb():
 def initialize_s3():
     """Initialize S3 client."""
     try:
-        s3_client = boto3.client('s3')
+        region = os.getenv('AWS_REGION', 'eu-west-2')
+        s3_client = boto3.client('s3', region_name=region)
         # Verify bucket exists by listing objects (will throw error if bucket doesn't exist)
         s3_client.head_bucket(Bucket=S3_BUCKET)
         logger.info(f"Connected to S3 bucket: {S3_BUCKET}")
@@ -508,6 +511,107 @@ def main(no_db: bool = False):
         uploaded, failed = upload_documents_to_s3(s3_client)
     except Exception as e:
         logger.warning(f"Document processing failed (non-fatal): {e}")
+
+
+def lambda_handler(event, context):
+    """AWS Lambda handler for running the ETL pipeline.
+
+    This function is invoked by AWS Lambda and runs the complete
+    ETL pipeline (extract → transform → load) with PDF uploads.
+
+    Args:
+        event: Lambda event object (can contain optional parameters)
+        context: Lambda context object with function metadata
+
+    Returns:
+        dict: Response object with statusCode and body
+        {
+            "statusCode": 200 or 500,
+            "body": {
+                "message": "Pipeline completed successfully" or error message,
+                "created": int,
+                "updated": int,
+                "failed": int,
+                "execution_time": float (seconds)
+            }
+        }
+
+    Example event (optional parameters):
+        {
+            "start_date": "2024-01-01",
+            "end_date": "2024-01-31",
+            "save_pdf": true,
+            "no_db": false
+        }
+    """
+    import time
+    import json
+
+    start_time = time.time()
+
+    try:
+        logger.info("=" * 60)
+        logger.info("AWS Lambda: Starting ETL Pipeline")
+        logger.info("=" * 60)
+
+        # Extract optional parameters from event
+        start_date = event.get("start_date") if event else None
+        end_date = event.get("end_date") if event else None
+        save_pdf = event.get("save_pdf", True) if event else True
+        no_db = event.get("no_db", False) if event else False
+
+        logger.info(f"Parameters:")
+        logger.info(f"  start_date: {start_date}")
+        logger.info(f"  end_date: {end_date}")
+        logger.info(f"  save_pdf: {save_pdf}")
+        logger.info(f"  no_db: {no_db}")
+
+        # Run the pipeline
+        created, updated, failed = run_full_pipeline(
+            start_date=start_date,
+            end_date=end_date,
+            no_db=no_db,
+            local=False,  # Lambda always uses AWS resources
+            save_pdf=save_pdf
+        )
+
+        execution_time = time.time() - start_time
+
+        response = {
+            "statusCode": 200,
+            "body": {
+                "message": "Pipeline completed successfully",
+                "created": created,
+                "updated": updated,
+                "failed": failed,
+                "execution_time": round(execution_time, 2)
+            }
+        }
+
+        logger.info(f"\nLambda execution completed in {execution_time:.2f}s")
+        logger.info(
+            f"Results: {created} created, {updated} updated, {failed} failed")
+
+        return response
+
+    except Exception as e:
+        execution_time = time.time() - start_time
+        error_msg = f"Pipeline failed: {str(e)}"
+
+        logger.error(
+            f"\n❌ Lambda execution failed after {execution_time:.2f}s")
+        logger.error(error_msg, exc_info=True)
+
+        return {
+            "statusCode": 500,
+            "body": {
+                "message": error_msg,
+                "created": 0,
+                "updated": 0,
+                "failed": 0,
+                "execution_time": round(execution_time, 2)
+            }
+        }
 
 
 if __name__ == "__main__":
