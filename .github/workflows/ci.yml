@@ -41,12 +41,12 @@ jobs:
                   --fail-under=6 \
                   pipeline/
 
-            # - name: Lint dashboard
-            #   run: |
-            #     pylint \
-            #       --recursive=y \
-            #       --fail-under=6 \
-            #       dashboard/
+            - name: Lint dashboard
+              run: |
+                pylint \
+                  --recursive=y \
+                  --fail-under=6 \
+                  dashboard/
             
             # - name: Lint terraform lambda
             #   run: |
@@ -55,15 +55,15 @@ jobs:
             #       --fail-under=6 \
             #       terraform/lambda/
 
-            # - name: Test dashboard
-            #   run: |
-            #     pytest \
-            #       --cov=dashboard/ \
-            #       --cov-report=term-missing \
-            #       --cov-report=xml \
-            #       --cov-fail-under=50 \
-            #       -v \
-            #       dashboard/
+            - name: Test dashboard
+              run: |
+                pytest \
+                  --cov=dashboard/ \
+                  --cov-report=term-missing \
+                  --cov-report=xml \
+                  --cov-fail-under=50 \
+                  -v \
+                  dashboard/
 
             - name: Test pipeline
               run: |
