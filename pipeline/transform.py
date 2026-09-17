@@ -2,10 +2,11 @@
 Validate and transform planning application data.
 
 Handles:
-- Loading CSV data from data/ directory
+- Accepting DataFrames from extract.py
 - Standardizing null values to "N/A"
 - Type casting columns to appropriate data types
 - Validating data integrity
+- Returning transformed DataFrames
 """
 
 import pandas as pd
@@ -42,7 +43,7 @@ REQUIRED_COLUMNS = {"uid", "address",
 
 
 def load_csv_data(csv_path: Path) -> Optional[pd.DataFrame]:
-    """Load CSV data from file."""
+    """Load CSV data from file (for local testing only)."""
     try:
         df = pd.read_csv(csv_path)
         logger.info(f"Loaded {len(df)} records from {csv_path}")
@@ -53,6 +54,59 @@ def load_csv_data(csv_path: Path) -> Optional[pd.DataFrame]:
     except Exception as e:
         logger.error(f"Error loading CSV {csv_path}: {e}")
         return None
+
+
+def transform_dataframe(df: pd.DataFrame, area_name: str) -> Tuple[pd.DataFrame, dict]:
+    """
+    Transform a single DataFrame through validation pipeline.
+
+    Returns: (transformed_df, report)
+    """
+    if df is None or df.empty:
+        logger.error(f"Cannot transform empty dataframe for {area_name}")
+        return df, {"error": "Empty dataframe"}
+
+    logger.info(f"Starting transformation for {area_name} ({len(df)} records)")
+
+    # Standardize nulls
+    df = standardize_nulls(df)
+
+    # Type cast
+    df, casting_errors = typecast_columns(df)
+
+    # Validate
+    df, validation_report = validate_data(df)
+
+    report = {
+        "area_name": area_name,
+        "rows_processed": len(df),
+        "type_casting_errors": casting_errors,
+        "validation_report": validation_report,
+    }
+
+    logger.info(f"Transformation complete for {area_name}")
+    return df, report
+
+
+def transform_dataframes(dfs_dict: Dict[str, pd.DataFrame]) -> Tuple[Dict[str, pd.DataFrame], Dict[str, dict]]:
+    """
+    Transform all DataFrames through validation pipeline.
+
+    Args:
+        dfs_dict: Dictionary mapping area_name to DataFrame
+
+    Returns:
+        (transformed_dfs_dict, reports_dict)
+    """
+    transformed_dfs = {}
+    reports = {}
+
+    for area_name, df in dfs_dict.items():
+        transformed_df, report = transform_dataframe(df, area_name)
+        transformed_dfs[area_name] = transformed_df
+        reports[area_name] = report
+
+    return transformed_dfs, reports
 
 
 def standardize_nulls(df: pd.DataFrame) -> pd.DataFrame:
@@ -186,45 +240,8 @@ def validate_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, dict]:
     return df, validation_report
 
 
-def transform(csv_path: Path) -> Tuple[Optional[pd.DataFrame], dict]:
-    """
-    Complete transformation pipeline:
-    1. Load CSV
-    2. Standardize nulls
-    3. Type cast columns
-    4. Validate data
-
-    Returns: (transformed_df, transformation_report)
-    """
-    logger.info(f"Starting transformation for {csv_path}")
-
-    # Load
-    df = load_csv_data(csv_path)
-    if df is None:
-        return None, {"error": "Failed to load CSV"}
-
-    # Standardize nulls
-    df = standardize_nulls(df)
-
-    # Type cast
-    df, casting_errors = typecast_columns(df)
-
-    # Validate
-    df, validation_report = validate_data(df)
-
-    report = {
-        "file": str(csv_path),
-        "rows_processed": len(df),
-        "type_casting_errors": casting_errors,
-        "validation_report": validation_report,
-    }
-
-    logger.info(f"Transformation complete for {csv_path}")
-    return df, report
-
-
 def transform_all_files() -> Dict[str, Tuple[pd.DataFrame, dict]]:
-    """Transform all CSV files in data/ directory."""
+    """Transform all CSV files in data/ directory (for local testing only)."""
     results = {}
 
     if not DATA_DIR.exists():
@@ -235,8 +252,11 @@ def transform_all_files() -> Dict[str, Tuple[pd.DataFrame, dict]]:
     logger.info(f"Found {len(csv_files)} CSV files to transform")
 
     for csv_path in csv_files:
-        df, report = transform(csv_path)
-        results[csv_path.name] = (df, report)
+        df = load_csv_data(csv_path)
+        if df is not None:
+            area_name = csv_path.stem  # e.g., "area_318"
+            transformed_df, report = transform_dataframe(df, area_name)
+            results[csv_path.name] = (transformed_df, report)
 
     return results
 
