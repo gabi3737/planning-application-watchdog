@@ -34,7 +34,7 @@ DATA_DIR = Path(__file__).parent / "data"
 DOCUMENTS_DIR = Path(__file__).parent / "documents"
 TABLE_NAME = "c25-planning-data-db"
 S3_BUCKET = "c25-planning-files-bucket"
-S3_PREFIX = "Documents"
+S3_PREFIX = "documents"
 PARTITION_KEY = "area"  # Maps to area_name
 SORT_KEY = "uid"
 
@@ -318,7 +318,7 @@ def upload_documents_to_s3(s3_client) -> Tuple[int, int]:
 
         for pdf_path in pdf_files:
             try:
-                # Construct S3 key: Documents/{uid}/{filename}
+                # Construct S3 key: documents/{uid}/{filename}
                 s3_key = f"{S3_PREFIX}/{uid}/{pdf_path.name}"
 
                 logger.debug(f"    Uploading to s3://{S3_BUCKET}/{s3_key}")
