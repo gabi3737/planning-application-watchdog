@@ -190,41 +190,42 @@ def load_csv_file(table, csv_path: Path, no_db: bool = False) -> Tuple[int, int,
 
 def upload_documents_to_s3(s3_client) -> Tuple[int, int]:
     """Upload all documents from documents/ subfolders to S3.
-    
+
     Structure: S3Bucket/Documents/{uid}/{filename}
-    
+
     Returns: (uploaded_count, failed_count)
     """
     if not DOCUMENTS_DIR.exists():
         logger.warning(f"Documents directory not found: {DOCUMENTS_DIR}")
         return 0, 0
-    
+
     uploaded_count = 0
     failed_count = 0
-    
+
     # Iterate through all uid subfolders in documents/
     uid_folders = [d for d in DOCUMENTS_DIR.iterdir() if d.is_dir()]
     if not uid_folders:
         logger.info("No documents to upload")
         return 0, 0
-    
+
     logger.info(f"Uploading {len(uid_folders)} document folder(s) to S3...")
-    
+
     for uid_folder in uid_folders:
         uid = uid_folder.name
-        pdf_files = list(uid_folder.glob("*.pdf")) + list(uid_folder.glob("*.PDF"))
-        
+        pdf_files = list(uid_folder.glob("*.pdf")) + \
+            list(uid_folder.glob("*.PDF"))
+
         if not pdf_files:
             logger.debug(f"  No PDFs found in {uid}")
             continue
-        
+
         logger.debug(f"  Uploading {len(pdf_files)} file(s) for {uid}")
-        
+
         for pdf_path in pdf_files:
             try:
                 # Construct S3 key: Documents/{uid}/{filename}
                 s3_key = f"{S3_PREFIX}/{uid}/{pdf_path.name}"
-                
+
                 logger.debug(f"    Uploading to s3://{S3_BUCKET}/{s3_key}")
                 s3_client.upload_file(
                     str(pdf_path),
@@ -233,18 +234,20 @@ def upload_documents_to_s3(s3_client) -> Tuple[int, int]:
                 )
                 logger.info(f"    ✓ Uploaded {uid}/{pdf_path.name}")
                 uploaded_count += 1
-                
+
             except ClientError as e:
-                logger.error(f"    ✗ Failed to upload {uid}/{pdf_path.name}: {e}")
+                logger.error(
+                    f"    ✗ Failed to upload {uid}/{pdf_path.name}: {e}")
                 failed_count += 1
             except Exception as e:
-                logger.error(f"    ✗ Unexpected error uploading {uid}/{pdf_path.name}: {e}")
+                logger.error(
+                    f"    ✗ Unexpected error uploading {uid}/{pdf_path.name}: {e}")
                 failed_count += 1
-    
+
     logger.info(f"\nS3 Upload Summary:")
     logger.info(f"  Total uploaded: {uploaded_count}")
     logger.info(f"  Total failed: {failed_count}")
-    
+
     return uploaded_count, failed_count
 
 
