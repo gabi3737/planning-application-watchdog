@@ -116,7 +116,8 @@ resource "aws_iam_role_policy" "lambda_etl_policy" {
           "dynamodb:Query",
           "dynamodb:Scan",
           "dynamodb:UpdateItem",
-          "dynamodb:DeleteItem"
+          "dynamodb:DeleteItem",
+          "dynamodb:DescribeTable"
         ]
 
         Resource = aws_dynamodb_table.c25_planning_data_db.arn
@@ -130,7 +131,8 @@ resource "aws_iam_role_policy" "lambda_etl_policy" {
           "dynamodb:Query",
           "dynamodb:Scan",
           "dynamodb:UpdateItem",
-          "dynamodb:DeleteItem"
+          "dynamodb:DeleteItem",
+          "dynamodb:DescribeTable"
         ]
 
         Resource = aws_dynamodb_table.c25_planning_user_db.arn
