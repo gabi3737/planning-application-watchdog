@@ -1,4 +1,16 @@
-variable "etl_image_uri" {
+variable "aws_region" {
   type        = string
-  description = "ECR image URI for the ETL Lambda"
+  description = "AWS region for the resources"
+  default = "eu-west-2"
 }
+
+variable "aws_access_key" {
+  type        = string
+  description = "AWS access key"
+}
+
+variable "aws_secret_key" {
+  type        = string
+  description = "AWS secret key"
+}
+
