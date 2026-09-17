@@ -7,79 +7,79 @@ resource "aws_ecr_repository" "dashboard_repo" {
 # Dashboard ECS Role
 
 data "aws_iam_policy_document" "ecs_dashboard_trust_policy_doc" {
-    statement {
-      effect = "Allow"
-      principals {
-        type = "Service"
-        identifiers = [ "ecs-tasks.amazonaws.com" ]
-      }
-      actions = [
-        "sts:AssumeRole"
-      ]
+  statement {
+    effect = "Allow"
+    principals {
+      type        = "Service"
+      identifiers = ["ecs-tasks.amazonaws.com"]
     }
+    actions = [
+      "sts:AssumeRole"
+    ]
+  }
 }
 
 
 data "aws_iam_policy_document" "ecs_dashboard_permissions_policy_doc" {
-    statement {
-      effect = "Allow"
-      actions = [
-        "s3:GetObject",
-        "s3:PutObject",
-        "s3:DeleteObject"
-      ]
-      resources = ["${aws_s3_bucket.c25_planning_files_bucket.arn}/*"]
-    }
+  statement {
+    effect = "Allow"
+    actions = [
+      "s3:GetObject",
+      "s3:PutObject",
+      "s3:DeleteObject"
+    ]
+    resources = ["${aws_s3_bucket.c25_planning_files_bucket.arn}/*"]
+  }
 
-    statement {
-      effect = "Allow"
-      actions = [
-        "logs:CreateLogGroup",
-        "logs:CreateLogStream",
-        "logs:PutLogEvents"
-      ]
-      resources = ["*"]
-    }
+  statement {
+    effect = "Allow"
+    actions = [
+      "logs:CreateLogGroup",
+      "logs:CreateLogStream",
+      "logs:PutLogEvents"
+    ]
+    resources = ["*"]
+  }
 
-    statement {
-      effect = "Allow"
-      actions = [
-        "dynamodb:PutItem",
-        "dynamodb:GetItem",
-        "dynamodb:Query",
-        "dynamodb:Scan",
-        "dynamodb:UpdateItem",
-        "dynamodb:DeleteItem"
-      ]
-      resources = [aws_dynamodb_table.c25_planning_data_db.arn]
-    }
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:PutItem",
+      "dynamodb:GetItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+      "dynamodb:DeleteItem"
+    ]
+    resources = [aws_dynamodb_table.c25_planning_data_db.arn]
+  }
 
-    statement {
-      effect = "Allow"
-      actions = [
-        "dynamodb:PutItem",
-        "dynamodb:GetItem",
-        "dynamodb:Query",
-        "dynamodb:Scan",
-        "dynamodb:UpdateItem",
-        "dynamodb:DeleteItem"
-      ]
-      resources = [aws_dynamodb_table.c25_planning_user_db.arn]
-    }   
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:PutItem",
+      "dynamodb:GetItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+      "dynamodb:DeleteItem"
+    ]
+    resources = [aws_dynamodb_table.c25_planning_user_db.arn]
+  }
 }
 
 resource "aws_iam_role" "ecs_dashboard_role" {
-    name = "c25-planning-dashboard-ecs-role"
-    assume_role_policy = data.aws_iam_policy_document.ecs_dashboard_trust_policy_doc.json
+  name               = "c25-planning-dashboard-ecs-role"
+  assume_role_policy = data.aws_iam_policy_document.ecs_dashboard_trust_policy_doc.json
 }
 
 resource "aws_iam_policy" "ecs_dashboard_role_permissions_policy" {
-    name = "c25-planning-dashboard-ecs-permissions-policy"
-    policy = data.aws_iam_policy_document.ecs_dashboard_permissions_policy_doc.json
+  name   = "c25-planning-dashboard-ecs-permissions-policy"
+  policy = data.aws_iam_policy_document.ecs_dashboard_permissions_policy_doc.json
 }
 
 resource "aws_iam_role_policy_attachment" "ecs_dashboard_role_policy_connection" {
-  role = aws_iam_role.ecs_dashboard_role.name
+  role       = aws_iam_role.ecs_dashboard_role.name
   policy_arn = aws_iam_policy.ecs_dashboard_role_permissions_policy.arn
 }
 
@@ -131,7 +131,7 @@ resource "aws_security_group" "ecs_dashboard_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-# Outbound: DNS (required for name resolution)
+  # Outbound: DNS (required for name resolution)
   egress {
     from_port   = 53
     to_port     = 53
@@ -156,7 +156,7 @@ resource "aws_ecs_task_definition" "ecs_dashboard_task" {
   cpu                      = "256"
   memory                   = "512"
   execution_role_arn       = aws_iam_role.ecs_dashboard_role.arn
-  task_role_arn = aws_iam_role.ecs_dashboard_role.arn
+  task_role_arn            = aws_iam_role.ecs_dashboard_role.arn
 
   container_definitions = jsonencode([
     {
@@ -173,7 +173,7 @@ resource "aws_ecs_task_definition" "ecs_dashboard_task" {
         logDriver = "awslogs"
         options = {
           "awslogs-group"         = aws_cloudwatch_log_group.ecs_dashboard_logs.name
-          "awslogs-region"        = data.aws_region.current.name
+          "awslogs-region"        = var.aws_region
           "awslogs-stream-prefix" = "ecs"
         }
       }
