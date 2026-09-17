@@ -14,3 +14,19 @@ variable "aws_secret_key" {
   description = "AWS secret key"
 }
 
+variable "vpc_id" {
+  type        = string
+  description = "VPC ID"
+}
+
+variable "ecs_cluster_name" {
+  type        = string
+  description = "ECS cluster name"
+  default = "c25-ecs-cluster"
+}
+
+variable "subnet_group_name" {
+  type        = string
+  description = "Subnet group name"
+  default = "c25-public-subnet"
+}
