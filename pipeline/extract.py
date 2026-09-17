@@ -32,7 +32,7 @@ HEADERS = {
     "Accept": "application/pdf"
 }
 
-logging.basicConfig(level=logging.INFO,
+logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -94,13 +94,17 @@ def load_webpage(url: str, session: requests.Session) -> Optional[BeautifulSoup]
         return None
 
 
-def find_pdf_urls(soup: BeautifulSoup, url: str) -> List[str]:
-    """Find and return all PDF URLs from the given BeautifulSoup object."""
+def find_pdf_urls(soup: BeautifulSoup, url: str) -> List[Tuple[str, str]]:
+    """Find and return all PDF URLs and their link text from the given BeautifulSoup object.
+
+    Returns: List of tuples (full_url, link_text)
+    """
     urls = []
     for link in soup.find_all("a", href=True):
         if link["href"].lower().endswith(".pdf"):
             full_url = urljoin(url, link["href"])
-            urls.append(full_url)
+            link_text = link.get_text(strip=True)
+            urls.append((full_url, link_text))
     return urls
 
 
@@ -116,51 +120,95 @@ def get_pdf(url: str, session: requests.Session) -> Optional[bytes]:
         return None
 
 
-def save_pdf(content: bytes, filename: str) -> bool:
-    """Save PDF content to file. Returns True if successful."""
+def save_pdf_to_uid_folder(content: bytes, uid: str, filename: str) -> bool:
+    """Save PDF content to a uid-specific subfolder. Returns True if successful."""
     try:
-        DOCUMENTS_DIR.mkdir(parents=True, exist_ok=True)
+        safe_uid = uid.replace("/", "_")
+        uid_folder = DOCUMENTS_DIR / safe_uid
+        uid_folder.mkdir(parents=True, exist_ok=True)
+
         # Sanitize filename to remove any path separators
         safe_filename = filename.replace("/", "_")
-        filepath = DOCUMENTS_DIR / safe_filename
+        filepath = uid_folder / safe_filename
         with open(filepath, "wb") as f:
             f.write(content)
-        logger.info(f"Saved PDF: {filepath}")
+        logger.debug(f"    Saved PDF to {filepath}")
         return True
     except Exception as e:
-        logger.error(f"Error saving PDF {filename}: {e}")
+        logger.error(f"    Error saving PDF for {uid}: {e}")
         return False
 
 
-def download_documents(app_url: str, session: requests.Session, uid: str) -> int:
-    """Download all PDFs for a planning application. Returns count of saved PDFs."""
+def download_documents(app_url: str, session: requests.Session, uid: str) -> bool:
+    """Download the application form PDF for a planning application.
+
+    Strategy: 
+    1. Find all PDF links
+    2. Prioritize PDFs with 'form' or 'applicationform' in link text
+    3. Fall back to first PDF if no form found
+    4. Return True if successfully downloaded, False otherwise
+    """
     if not app_url:
-        return 0
+        logger.debug(f"    No URL provided for {uid}")
+        return False
 
     try:
+        logger.debug(f"    Loading documents page for {uid}")
         docs_url = convert_url_to_documents_url(app_url)
         soup = load_webpage(docs_url, session)
         if not soup:
-            return 0
+            logger.warning(f"    Could not load documents page for {uid}")
+            return False
 
-        pdf_urls = find_pdf_urls(soup, docs_url)
-        if not pdf_urls:
-            logger.debug(f"No PDFs found for {uid}")
-            return 0
+        # Get all PDF links with their text
+        pdf_links = find_pdf_urls(soup, docs_url)
+        if not pdf_links:
+            logger.debug(f"    No PDFs found for {uid}")
+            return False
 
-        saved_count = 0
-        for pdf_url in pdf_urls:
-            pdf_content = get_pdf(pdf_url, session)
-            if pdf_content:
-                filename = f"{uid}_{pdf_url.split('/')[-1]}"
-                if save_pdf(pdf_content, filename):
-                    saved_count += 1
-            time.sleep(0.5)  # Small delay between PDF downloads
+        logger.debug(f"    Found {len(pdf_links)} PDF links for {uid}")
 
-        return saved_count
+        # Try to find a form PDF
+        selected_pdf_url = None
+        selected_pdf_text = None
+
+        for pdf_url, link_text in pdf_links:
+            link_text_lower = link_text.lower()
+            if "form" in link_text_lower or "applicationform" in link_text_lower:
+                selected_pdf_url = pdf_url
+                selected_pdf_text = link_text
+                logger.info(f"    ✓ Found form PDF: {link_text}")
+                break
+
+        # Fall back to first PDF if no form found
+        if not selected_pdf_url:
+            selected_pdf_url, selected_pdf_text = pdf_links[0]
+            logger.info(
+                f"    ✓ No form PDF found, using first: {selected_pdf_text}")
+
+        # Download the selected PDF
+        logger.debug(f"    Downloading {selected_pdf_text}...")
+        pdf_content = get_pdf(selected_pdf_url, session)
+        if not pdf_content:
+            logger.warning(
+                f"    Failed to download {selected_pdf_text} for {uid}")
+            return False
+
+        # Extract filename from URL, fallback to generic name
+        filename = selected_pdf_url.split("/")[-1]
+        if not filename or not filename.lower().endswith(".pdf"):
+            filename = "Application_Form.pdf"
+
+        # Save to uid-specific folder
+        if save_pdf_to_uid_folder(pdf_content, uid, filename):
+            logger.info(f"    ✓ Saved application form for {uid}")
+            return True
+        else:
+            return False
+
     except Exception as e:
-        logger.error(f"Error downloading documents for {uid}: {e}")
-        return 0
+        logger.error(f"    Error downloading documents for {uid}: {e}")
+        return False
 
 
 def extract_from_record(app: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -284,16 +332,29 @@ def main(start_date: str = None, end_date: str = None, save_pdf: bool = False):
         if extracted:
             save_to_csv(extracted, area_name)
 
-            # Download PDFs for each application if enabled
+            # Download application forms if enabled
             if save_pdf and session:
-                total_pdfs = 0
-                for record in extracted:
-                    if record.get("url"):
-                        pdfs_saved = download_documents(
-                            record["url"], session, record["uid"])
-                        total_pdfs += pdfs_saved
+                logger.info(
+                    f"  Downloading application forms for {len(extracted)} records...")
+                forms_downloaded = 0
+                forms_failed = 0
 
-                logger.info(f"  PDFs downloaded for {area_name}: {total_pdfs}")
+                for i, record in enumerate(extracted, 1):
+                    if record.get("url"):
+                        logger.debug(
+                            f"  [{i}/{len(extracted)}] Processing {record['uid']}")
+                        if download_documents(record["url"], session, record["uid"]):
+                            forms_downloaded += 1
+                        else:
+                            forms_failed += 1
+                        # Delay between each application's download to avoid rate limiting
+                        time.sleep(2)
+                    else:
+                        logger.debug(
+                            f"  [{i}/{len(extracted)}] Skipping {record['uid']} (no URL)")
+
+                logger.info(
+                    f"  Application forms for {area_name}: {forms_downloaded} downloaded, {forms_failed} failed")
 
 
 if __name__ == "__main__":
