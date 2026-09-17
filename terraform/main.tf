@@ -15,6 +15,8 @@ provider "aws" {
 
 # roles/policies
 
+# ETL Pipeline Lambda
+
 resource "aws_iam_role" "etl_lambda_role" {
   name = "c25-planning-etl-lambda-role"
 
@@ -91,4 +93,65 @@ resource "aws_iam_role_policy" "lambda_etl_policy" {
       }
     ]
   })
+}
+
+# ETL Lambda Schedule
+
+data "aws_iam_policy_document" "schedule_etl_trust_policy_doc" {
+    statement {
+      effect = "Allow"
+      principals {
+        type = "Service"
+        identifiers = [ "scheduler.amazonaws.com" ]
+      }
+      actions = [
+        "sts:AssumeRole"
+      ]
+    }
+}
+
+data "aws_iam_policy_document" "schedule_etl_permissions_policy_doc" {
+    statement {
+      effect = "Allow"
+      actions = [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents",
+      ]
+      resources = [ "arn:aws:logs:eu-west-2:129033205317:*" ]
+    }
+
+    statement {
+      effect = "Allow"
+      actions = [
+        "lambda:InvokeFunction"
+      ]
+      resources = [ aws_lambda_function.etl_lambda.arn ]
+    }
+
+    statement {
+        effect   = "Allow"
+        actions   = ["iam:PassRole"]
+        resources = [aws_iam_role.schedule_etl_role.arn]
+        condition {
+        test     = "StringLike"
+        variable = "iam:PassedToService"
+        values   = ["lambda.amazonaws.com"]
+        }
+    }
+}
+
+resource "aws_iam_role" "schedule_etl_role" {
+    name = "c25-planning-schedule-etl-role"
+    assume_role_policy = data.aws_iam_policy_document.schedule_etl_trust_policy_doc.json
+}
+
+resource "aws_iam_policy" "schedule_etl_role_permissions_policy" {
+    name = "c25-planning-schedule-etl-permissions-policy"
+    policy = data.aws_iam_policy_document.schedule_etl_permissions_policy_doc.json
+}
+
+resource "aws_iam_role_policy_attachment" "schedule_etl_role_policy_connection" {
+  role = aws_iam_role.schedule_etl_role.name
+  policy_arn = aws_iam_policy.schedule_etl_role_permissions_policy.arn
 }
