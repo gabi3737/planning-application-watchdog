@@ -52,13 +52,23 @@ resource "aws_s3_bucket_public_access_block" "c25_planning_files_bucket" {
   restrict_public_buckets = true
 }
 
+# ECR for Lambda:
+
+resource "aws_ecr_repository" "pipeline-image-repo" {
+  name = "c25-planning-etl-repo"
+  image_tag_mutability = "MUTABLE"
+}
+
+# Lambda Function:
 
 resource "aws_lambda_function" "etl_lambda" {
   function_name = "c25-planning-etl"
   role          = aws_iam_role.etl_lambda_role.arn
   package_type  = "Image"
-  image_uri     = var.etl_image_uri # Note: We currently don't have a URI
+  image_uri     = "${aws_ecr_repository.pipeline-image-repo.repository_url}:latest"
 
   memory_size = 512
   timeout     = 60
 }
+
+# EventBridge Schedule:
