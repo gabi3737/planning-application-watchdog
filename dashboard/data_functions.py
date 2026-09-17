@@ -91,14 +91,20 @@ def set_s3_client(session: boto3.Session) -> boto3.client:
 
 def load_application_documents(s3_client: boto3.client, bucket_name: str, uid: str) -> None:
     """Downloads documents from a specific application UID in the S3 Bucket."""
+    # Very likely to not work
     objects = s3_client.list_objects(Bucket=bucket_name)
     file_found = False
     for folder in objects.get("Contents", []):
         if folder["Key"].endswith(uid):
             s3_client.download_file(
-                bucket_name, folder["Key"], f"./data/{folder['Key']}")
+                bucket_name, folder["Key"], f"./documents/{folder['Key']}")
             file_found = True
 
     if not file_found:
         raise FileNotFoundError(
             f"No documents found for application UID '{uid}' in bucket '{bucket_name}'.")
+
+
+def load_csv_data() -> pd.DataFrame:
+    # Postcode column for CSV data remains invalid
+    ...
