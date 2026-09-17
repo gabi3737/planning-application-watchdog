@@ -135,7 +135,6 @@ def add_areas_to_map(m: folium.Map, areas: list) -> folium.Map:
             locations=[[point[1], point[0]]
                        for point in area["geometry"]["coordinates"][0]],
             popup=f"""Conservation Area: {area['properties']['NAME']}""",
-            icon=folium.Icon(color="purple", icon="tree"),
             color="green",
             fill=True,
             fill_color="green"
