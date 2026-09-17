@@ -1,8 +1,11 @@
 """
-Load planning application data from CSV files into DynamoDB.
+Load planning application data from CSV files into DynamoDB and upload documents to S3.
 
 Reads transformed CSV files from data/ directory and uploads to
 DynamoDB table with partition key 'area' and sort key 'uid'.
+
+Also uploads all PDF documents from documents/ subfolders to S3 bucket,
+organized by UID: s3://c25-planning-files-bucket/Documents/{uid}/{filename}
 
 Usage:
     python3 load.py
@@ -20,7 +23,10 @@ from botocore.exceptions import ClientError
 
 # Configuration
 DATA_DIR = Path(__file__).parent / "data"
+DOCUMENTS_DIR = Path(__file__).parent / "documents"
 TABLE_NAME = "c25-planning-data-db"
+S3_BUCKET = "c25-planning-files-bucket"
+S3_PREFIX = "Documents"
 PARTITION_KEY = "area"  # Maps to area_name
 SORT_KEY = "uid"
 
@@ -40,6 +46,19 @@ def initialize_dynamodb():
         return table
     except ClientError as e:
         logger.error(f"Failed to connect to DynamoDB: {e}")
+        raise
+
+
+def initialize_s3():
+    """Initialize S3 client."""
+    try:
+        s3_client = boto3.client('s3')
+        # Verify bucket exists by listing objects (will throw error if bucket doesn't exist)
+        s3_client.head_bucket(Bucket=S3_BUCKET)
+        logger.info(f"Connected to S3 bucket: {S3_BUCKET}")
+        return s3_client
+    except ClientError as e:
+        logger.error(f"Failed to connect to S3 bucket: {e}")
         raise
 
 
@@ -169,6 +188,66 @@ def load_csv_file(table, csv_path: Path, no_db: bool = False) -> Tuple[int, int,
         return 0, 1
 
 
+def upload_documents_to_s3(s3_client) -> Tuple[int, int]:
+    """Upload all documents from documents/ subfolders to S3.
+    
+    Structure: S3Bucket/Documents/{uid}/{filename}
+    
+    Returns: (uploaded_count, failed_count)
+    """
+    if not DOCUMENTS_DIR.exists():
+        logger.warning(f"Documents directory not found: {DOCUMENTS_DIR}")
+        return 0, 0
+    
+    uploaded_count = 0
+    failed_count = 0
+    
+    # Iterate through all uid subfolders in documents/
+    uid_folders = [d for d in DOCUMENTS_DIR.iterdir() if d.is_dir()]
+    if not uid_folders:
+        logger.info("No documents to upload")
+        return 0, 0
+    
+    logger.info(f"Uploading {len(uid_folders)} document folder(s) to S3...")
+    
+    for uid_folder in uid_folders:
+        uid = uid_folder.name
+        pdf_files = list(uid_folder.glob("*.pdf")) + list(uid_folder.glob("*.PDF"))
+        
+        if not pdf_files:
+            logger.debug(f"  No PDFs found in {uid}")
+            continue
+        
+        logger.debug(f"  Uploading {len(pdf_files)} file(s) for {uid}")
+        
+        for pdf_path in pdf_files:
+            try:
+                # Construct S3 key: Documents/{uid}/{filename}
+                s3_key = f"{S3_PREFIX}/{uid}/{pdf_path.name}"
+                
+                logger.debug(f"    Uploading to s3://{S3_BUCKET}/{s3_key}")
+                s3_client.upload_file(
+                    str(pdf_path),
+                    S3_BUCKET,
+                    s3_key
+                )
+                logger.info(f"    ✓ Uploaded {uid}/{pdf_path.name}")
+                uploaded_count += 1
+                
+            except ClientError as e:
+                logger.error(f"    ✗ Failed to upload {uid}/{pdf_path.name}: {e}")
+                failed_count += 1
+            except Exception as e:
+                logger.error(f"    ✗ Unexpected error uploading {uid}/{pdf_path.name}: {e}")
+                failed_count += 1
+    
+    logger.info(f"\nS3 Upload Summary:")
+    logger.info(f"  Total uploaded: {uploaded_count}")
+    logger.info(f"  Total failed: {failed_count}")
+    
+    return uploaded_count, failed_count
+
+
 def load_all_files(table, no_db: bool = False) -> Dict[str, Tuple[int, int, int]]:
     """
     Load all CSV files from data/ directory into DynamoDB.
@@ -211,14 +290,14 @@ def load_all_files(table, no_db: bool = False) -> Dict[str, Tuple[int, int, int]
 
 
 def main(no_db: bool = False):
-    """Load all CSV data into DynamoDB."""
+    """Load all CSV data into DynamoDB and upload documents to S3."""
     logger.info(f"Loading planning data from {DATA_DIR} to {TABLE_NAME}")
 
     try:
         table = initialize_dynamodb()
         results = load_all_files(table, no_db)
 
-        # Print summary
+        # Print DynamoDB summary
         if results:
             logger.info("\nLoad Summary by Area:")
             for filename, (created, updated, failed) in results.items():
@@ -230,6 +309,14 @@ def main(no_db: bool = False):
     except Exception as e:
         logger.error(f"Failed to load data: {e}")
         raise
+
+    # Upload documents to S3 (non-fatal error)
+    try:
+        logger.info("\nStarting S3 document upload...")
+        s3_client = initialize_s3()
+        uploaded, failed = upload_documents_to_s3(s3_client)
+    except Exception as e:
+        logger.warning(f"S3 upload failed (non-fatal): {e}")
 
 
 if __name__ == "__main__":
