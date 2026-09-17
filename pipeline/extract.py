@@ -18,6 +18,9 @@ from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 import certifi
 from requests.exceptions import HTTPError
+import boto3
+from io import BytesIO
+from botocore.exceptions import ClientError
 
 # Configuration
 API_BASE_URL = "https://www.planit.org.uk/api/applics/json"
@@ -27,14 +30,29 @@ FIELDS = ["address", "app_size", "app_state", "app_type", "area_id",
 DATA_DIR = Path(__file__).parent / "data"
 DOCUMENTS_DIR = Path(__file__).parent / "documents"
 
+# S3 Configuration
+S3_BUCKET = os.getenv("S3_BUCKET", "c25-planning-files-bucket")
+S3_DOCUMENTS_PREFIX = "documents"
+USE_S3 = True  # Set to False with --local flag
+
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (+https://github.com/gabi3737; trainee.gabriela.prefit@sigma-labs.co.uk)",
     "Accept": "application/pdf"
 }
 
-logging.basicConfig(level=logging.DEBUG,
+logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+_s3_client = None
+
+
+def get_s3_client():
+    """Get or create S3 client."""
+    global _s3_client
+    if _s3_client is None:
+        _s3_client = boto3.client('s3')
+    return _s3_client
 
 
 def calculate_date_range() -> Tuple[str, str]:
@@ -120,22 +138,43 @@ def get_pdf(url: str, session: requests.Session) -> Optional[bytes]:
         return None
 
 
-def save_pdf_to_uid_folder(content: bytes, uid: str, filename: str) -> bool:
-    """Save PDF content to a uid-specific subfolder. Returns True if successful."""
-    try:
-        safe_uid = uid.replace("/", "_")
-        uid_folder = DOCUMENTS_DIR / safe_uid
-        uid_folder.mkdir(parents=True, exist_ok=True)
+def upload_pdf_to_s3_or_local(content: bytes, uid: str, filename: str) -> bool:
+    """Upload PDF to S3, or save locally if USE_S3is False. Returns True if successful."""
+    if not USE_S3:
+        # Local fallback for testing
+        try:
+            safe_uid = uid.replace("/", "_")
+            uid_folder = DOCUMENTS_DIR / safe_uid
+            uid_folder.mkdir(parents=True, exist_ok=True)
+            safe_filename = filename.replace("/", "_")
+            filepath = uid_folder / safe_filename
+            with open(filepath, "wb") as f:
+                f.write(content)
+            logger.debug(f"    Saved PDF to {filepath}")
+            return True
+        except Exception as e:
+            logger.error(f"    Error saving PDF for {uid}: {e}")
+            return False
 
-        # Sanitize filename to remove any path separators
+    # Upload to S3
+    try:
+        s3_client = get_s3_client()
+        safe_uid = uid.replace("/", "_")
         safe_filename = filename.replace("/", "_")
-        filepath = uid_folder / safe_filename
-        with open(filepath, "wb") as f:
-            f.write(content)
-        logger.debug(f"    Saved PDF to {filepath}")
+        s3_key = f"{S3_DOCUMENTS_PREFIX}/{safe_uid}/{safe_filename}"
+
+        s3_client.put_object(
+            Bucket=S3_BUCKET,
+            Key=s3_key,
+            Body=content
+        )
+        logger.debug(f"    Uploaded PDF to s3://{S3_BUCKET}/{s3_key}")
         return True
+    except ClientError as e:
+        logger.error(f"    Error uploading PDF for {uid} to S3: {e}")
+        return False
     except Exception as e:
-        logger.error(f"    Error saving PDF for {uid}: {e}")
+        logger.error(f"    Unexpected error uploading PDF for {uid}: {e}")
         return False
 
 
@@ -201,7 +240,7 @@ def download_documents(app_url: str, session: requests.Session, uid: str) -> boo
             filename = "Application_Form.pdf"
 
         # Save to uid-specific folder
-        if save_pdf_to_uid_folder(pdf_content, uid, filename):
+        if upload_pdf_to_s3_or_local(pdf_content, uid, filename):
             logger.info(f"    ✓ Saved application form for {uid}")
             return True
         else:
@@ -286,29 +325,18 @@ def fetch_applications(auth_code: int, start_date: str, end_date: str) -> List[D
     return all_records
 
 
-def save_to_csv(records: List[Dict], area_name: str) -> Path:
-    """Save records to CSV file."""
-    if not records:
-        logger.warning(f"No records for {area_name}")
-        return None
-
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    csv_path = DATA_DIR / f"{area_name}.csv"
-
-    df = pd.DataFrame(records)
-    df.to_csv(csv_path, index=False)
-    logger.info(f"Saved {len(records)} records to {csv_path}")
-
-    return csv_path
-
-
-def main(start_date: str = None, end_date: str = None, save_pdf: bool = False):
+def extract_all_areas(start_date: str = None, end_date: str = None, save_pdf: bool = False) -> Dict[str, pd.DataFrame]:
     """Extract planning applications for all areas.
+
+    Returns dict mapping area_name to DataFrame of extracted records.
 
     Args:
         start_date: Start date (YYYY-MM-DD) or None for last 7 days
         end_date: End date (YYYY-MM-DD) or None for last 7 days
-        save_pdf: If True, download PDFs for each application
+        save_pdf: If True, download and upload PDFs for each application
+
+    Returns:
+        {area_name: pd.DataFrame, ...}
     """
     if not start_date or not end_date:
         start_date, end_date = calculate_date_range()
@@ -319,6 +347,8 @@ def main(start_date: str = None, end_date: str = None, save_pdf: bool = False):
         session = create_session()
     else:
         session = None
+
+    extracted_dfs = {}
 
     for auth_code, area_name in AREA_CODES.items():
         logger.info(f"Processing {area_name} (auth={auth_code})")
@@ -331,7 +361,9 @@ def main(start_date: str = None, end_date: str = None, save_pdf: bool = False):
         logger.info(f"  Records extracted: {len(extracted)}")
 
         if extracted:
-            save_to_csv(extracted, area_name)
+            # Create DataFrame (in-memory, no CSV file)
+            df = pd.DataFrame(extracted)
+            extracted_dfs[area_name] = df
 
             # Download application forms if enabled
             if save_pdf and session:
@@ -349,13 +381,29 @@ def main(start_date: str = None, end_date: str = None, save_pdf: bool = False):
                         else:
                             forms_failed += 1
                         # Delay between each application's download to avoid rate limiting
-                        time.sleep(5)
+                        time.sleep(2)
                     else:
                         logger.debug(
                             f"  [{i}/{len(extracted)}] Skipping {record['uid']} (no URL)")
 
                 logger.info(
                     f"  Application forms for {area_name}: {forms_downloaded} downloaded, {forms_failed} failed")
+
+    return extracted_dfs
+
+
+def main(start_date: str = None, end_date: str = None, save_pdf: bool = False) -> Dict[str, pd.DataFrame]:
+    """Extract planning applications for all areas.
+
+    Args:
+        start_date: Start date (YYYY-MM-DD) or None for last 7 days
+        end_date: End date (YYYY-MM-DD) or None for last 7 days
+        save_pdf: If True, download PDFs for each application
+
+    Returns:
+        Dict[area_name, DataFrame] with extracted records
+    """
+    return extract_all_areas(start_date, end_date, save_pdf)
 
 
 if __name__ == "__main__":
@@ -365,6 +413,14 @@ if __name__ == "__main__":
     parser.add_argument("--end-date", help="End date (YYYY-MM-DD)")
     parser.add_argument("--save-pdf", action="store_true",
                         help="Download PDFs for each application")
+    parser.add_argument("--local", action="store_true",
+                        help="Save PDFs locally instead of uploading to S3")
     args = parser.parse_args()
 
-    main(args.start_date, args.end_date, args.save_pdf)
+    if args.local:
+        USE_S3 = False
+        logger.info("LOCAL mode: PDFs will be saved to local disk")
+
+    dfs = main(args.start_date, args.end_date, args.save_pdf)
+    logger.info(f"Extraction complete. Extracted {len(dfs)} area datasets:"
+                f" {', '.join(dfs.keys())}")
