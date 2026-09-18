@@ -69,13 +69,17 @@ def find_document_by_uid(session: boto3.Session, objects: dict, uid: str) -> byt
             response = s3_client.get_object(
                 Bucket=bucket_name, Key=obj["Key"])
             pdf_content = response["Body"].read()
-            filename = f"{uid}.pdf"
-            with open(filename, "wb") as f:
-                f.write(pdf_content)
-                logger.info(f"Document saved as {filename}")
             return pdf_content
     logger.warning(f"Application document with UID {uid} not found.")
     return None
+
+
+def save_pdf(uid: str, pdf_content: bytes) -> None:
+    """Save the PDF content to a file named after the UID."""
+    filename = f"{uid}.pdf"
+    with open(filename, "wb") as f:
+        f.write(pdf_content)
+        logger.info(f"Document saved as {filename}")
 
 
 def load_data_by_uid(session: boto3.Session, uid: str) -> dict:
@@ -136,6 +140,7 @@ def summarise_document(openai_client: OpenAI, document_text: str, application_da
         Analyze the following text from a PDF document and related information. Then create
          a concise summary of what is being proposed and why it might matter. The summary
          should use clear, simple language, stay under 100 words, and contain no links.
+         Do not add any bias on what you say, just factually summarise what the application is about.
 
         The information is stored as a dictionary with keys:
         - "address": The address of the planning application.
@@ -191,6 +196,40 @@ def summarise_document(openai_client: OpenAI, document_text: str, application_da
         return ""
 
 
+@st.cache_data
+def get_ai_summary(_session: boto3.Session, data: dict, documents: dict) -> str:
+    uid = data.get("uid")
+    uid = uid.replace("/", "_")
+    document = find_document_by_uid(_session, documents, uid)
+    if document:
+        logger.info(f"Document loaded successfully")
+        pdf_text = extract_pdf_text(document)
+        openai_client = create_openai_client()
+        summary = summarise_document(openai_client, pdf_text, data)
+        return summary
+    else:
+        logger.error("Document not found.")
+        return ""
+
+
+def convert_info_to_dict(info_string: str) -> dict:
+    """Convert application info string to dictionary, ignoring the last line."""
+    lines = info_string.strip().split('\n')
+
+    # Remove the last line (View on Council Website link)
+    lines = lines[:-1]
+
+    result = {}
+    for line in lines:
+        if ':' in line:
+            key, value = line.split(':', 1)
+            key = key.strip().lower()
+            value = value.strip()
+            result[key] = value
+
+    return result
+
+
 if __name__ == "__main__":
     session = create_boto3_session()
     uid = "Greenwich_26_2646_SD"
@@ -210,6 +249,7 @@ if __name__ == "__main__":
         data = {}
     documents = load_documents(session)
     document = find_document_by_uid(session, documents, uid)
+    save_pdf(uid, document)
     if document:
         logger.info(f"Document loaded successfully")
         pdf_text = extract_pdf_text(document)
