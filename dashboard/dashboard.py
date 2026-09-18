@@ -7,10 +7,14 @@ from streamlit_folium import st_folium
 from curl_cffi import requests
 from requests.exceptions import HTTPError
 from dotenv import load_dotenv
+import pandas as pd
 
-from data_functions import calculate_distance, get_sites, get_conservation_areas
+
 from dynamodb_functions import subscribe_user
 import re
+from data_functions import (calculate_distance, get_sites,
+                            get_conservation_areas, create_boto3_session,
+                            load_application_data, get_coords)
 
 load_dotenv()
 
@@ -48,20 +52,6 @@ FAKE_APPLICATIONS = [{
 #     return latitude, longitude, radius
 
 
-def add_applications_to_map(m: folium.Map, latitude: float, longitude: float,
-                            radius: int, fake_applications: list) -> None:
-    for app in fake_applications:
-        distance = calculate_distance(
-            latitude, longitude, app["latitude"], app["longitude"])
-        if distance <= radius:
-            folium.Marker(
-                location=[app["latitude"], app["longitude"]],
-                popup=f"Application {app['name']}: ({app['latitude']}, {app['longitude']})",
-                icon=folium.Icon(color="green", icon="home")
-            ).add_to(m)
-    return m
-
-
 def add_sites_to_map(m: folium.Map, sites: list) -> folium.Map:
     """Adds heritage sites to the map."""
     for site in sites:
@@ -90,8 +80,23 @@ def add_areas_to_map(m: folium.Map, areas: list) -> folium.Map:
     return m
 
 
+def add_applications_to_map(m: folium.Map, latitude: float, longitude: float,
+                            radius: int, coords_df: pd.DataFrame) -> folium.Map:
+    """Adds planning applications to the map based on their coordinates."""
+    for _, row in coords_df.iterrows():
+        distance = calculate_distance(
+            latitude, longitude, row["location_y"], row["location_x"])
+        if distance <= radius:
+            folium.Marker(
+                location=[row["location_y"], row["location_x"]],
+                popup=f"Application: ({row['location_y']}, {row['location_x']})",
+                icon=folium.Icon(color="green", icon="home")
+            ).add_to(m)
+    return m
+
+
 def create_map(latitude: float, longitude: float, radius: int,
-               fake_applications: list, sites: list, areas: list) -> folium.Map:
+               sites: list, areas: list, coords_df: pd.DataFrame) -> folium.Map:
     """Creates and populates the Map with planning applications and heritage sites."""
     m = folium.Map(location=[latitude, longitude], zoom_start=18)
 
@@ -101,11 +106,9 @@ def create_map(latitude: float, longitude: float, radius: int,
         icon=folium.Icon(color="red", icon="info-sign")
     ).add_to(m)
 
-    m = add_applications_to_map(
-        m, latitude, longitude, radius, fake_applications)
-
     m = add_sites_to_map(m, sites)
     m = add_areas_to_map(m, areas)
+    m = add_applications_to_map(m, latitude, longitude, radius, coords_df)
 
     folium.Circle(
         location=[latitude, longitude],
@@ -118,7 +121,8 @@ def create_map(latitude: float, longitude: float, radius: int,
     return m
 
 
-if __name__ == "__main__":
+def render_page() -> None:
+    """Renders the page title, config, and introductory text."""
     st.title("Planning Application Watchdog")
     st.set_page_config(
         page_title="Planning Application Watchdog",
@@ -142,7 +146,9 @@ if __name__ == "__main__":
         "Click on the markers to view detailed information about each location."
     )
 
-    # Sidebar controls
+
+def render_sidebar_controls() -> tuple[bool, float, float, int]:
+    """Displays sidebar inputs and returns use_map_click, latitude, longitude, and radius."""
     st.sidebar.header("📊 Visualization Controls")
 
     use_map_click = st.sidebar.checkbox(
@@ -198,28 +204,55 @@ if __name__ == "__main__":
             else:
                 st.sidebar.error(result['message'])
 
+    return use_map_click, latitude, longitude, radius
+
+
+def resolve_selected_location(use_map_click: bool, latitude: float,
+                              longitude: float) -> tuple[float, float]:
+    """Resolves the active latitude/longitude from sidebar inputs or map clicks."""
     if "selected_lat" not in st.session_state:
         st.session_state.selected_lat = latitude
     if "selected_lon" not in st.session_state:
         st.session_state.selected_lon = longitude
 
     if use_map_click:
-        lat = st.session_state.selected_lat
-        lon = st.session_state.selected_lon
-    else:
-        lat = latitude
-        lon = longitude
+        return st.session_state.selected_lat, st.session_state.selected_lon
+    return latitude, longitude
 
-    st.write(f"Selected Location: ({lat:.5f}, {lon:.5f})")
 
+def load_map_data(lat: float, lon: float, radius: int) -> tuple[list, list, pd.DataFrame]:
+    """Fetches heritage sites, conservation areas, and planning application coordinates."""
     sites = get_sites(lat, lon, radius)
     areas = get_conservation_areas(lat, lon, radius)
+    coords = get_coords(load_application_data(create_boto3_session()))
+    return sites, areas, coords
 
-    m = create_map(lat, lon, radius, FAKE_APPLICATIONS, sites, areas)
 
-    map_data = st_folium(m, width=900, height=600, key="analysis_map")
-
+def update_click_selection(use_map_click: bool, map_data: dict) -> None:
+    """Updates the session state location when the map is clicked."""
     if use_map_click and map_data and "last_clicked" in map_data and map_data["last_clicked"]:
         clicked = map_data["last_clicked"]
         st.session_state.selected_lat = clicked["lat"]
         st.session_state.selected_lon = clicked["lng"]
+
+
+def main() -> None:
+    """Runs the Planning Application Watchdog dashboard."""
+    render_page()
+
+    use_map_click, latitude, longitude, radius = render_sidebar_controls()
+    lat, lon = resolve_selected_location(
+        use_map_click, latitude, longitude)
+
+    st.write(f"Selected Location: ({lat:.5f}, {lon:.5f})")
+
+    sites, areas, coords = load_map_data(lat, lon, radius)
+
+    m = create_map(lat, lon, radius, sites, areas, coords)
+    map_data = st_folium(m, width=900, height=600, key="analysis_map")
+
+    update_click_selection(use_map_click, map_data)
+
+
+if __name__ == "__main__":
+    main()

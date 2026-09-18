@@ -8,6 +8,7 @@ from botocore.exceptions import ClientError
 from openai import OpenAI
 from dotenv import load_dotenv
 import pdfplumber
+import streamlit as st
 
 load_dotenv()
 
@@ -32,19 +33,37 @@ def create_boto3_session() -> boto3.Session:
     )
 
 
-def load_document(session: boto3.Session, uid: str) -> bytes:
-    """Load a document from the database using its UID."""
-    s3_client = session.client("s3")
+@st.cache_data
+def load_documents(_session: boto3.Session) -> dict:
+    """Load all documents from the S3 bucket."""
+    s3_client = _session.client("s3")
 
     bucket_name = os.getenv("PLANNING_FILES_BUCKET",
                             "c25-planning-files-bucket")
     try:
-        objects = s3_client.list_objects(Bucket=bucket_name)
-    except s3_client.exceptions.NoSuchBucket:
-        logger.error(f"Bucket {bucket_name} does not exist.")
-        return None
+        paginator = s3_client.get_paginator("list_objects_v2")
+        objects = {"Contents": [
+            obj
+            for page in paginator.paginate(
+                Bucket=bucket_name, Prefix=f"documents/")
+            for obj in page.get("Contents", [])
+        ]}
+    except ClientError as e:
+        logger.error(f"Error loading documents from bucket {bucket_name}: {e}")
+        return {}
+    if not objects.get("Contents"):
+        logger.warning(f"No documents found in bucket {bucket_name}.")
+        return {}
+    return objects
+
+
+def find_document_by_uid(session: boto3.Session, objects: dict, uid: str) -> bytes:
+    """Find a document from the S3 bucket using its UID."""
+    s3_client = session.client("s3")
+    bucket_name = os.getenv("PLANNING_FILES_BUCKET",
+                            "c25-planning-files-bucket")
     for obj in objects.get("Contents", []):
-        if uid in obj["Key"] and "document" in obj["Key"]:
+        if uid in obj["Key"]:
             logger.info(
                 f"Application document with UID {uid} found successfully.")
             response = s3_client.get_object(
@@ -59,15 +78,16 @@ def load_document(session: boto3.Session, uid: str) -> bytes:
     return None
 
 
-def load_data(session: boto3.Session, uid: str) -> dict:
+def load_data_by_uid(session: boto3.Session, uid: str) -> dict:
     """Loads metadata associated to a planning application from its UID."""
     uid = uid.replace("_", "/")
     dynamodb_client = session.client("dynamodb")
     table_name = os.getenv("PLANNING_TABLE_NAME", "c25-planning-data-db")
+    area = uid.split("/", 1)[0]
     try:
         response = dynamodb_client.get_item(
             TableName=table_name,
-            Key={"area": {"S": "Greenwich"},
+            Key={"area": {"S": area},
                  "uid": {"S": uid}}
         )
     except ClientError:
@@ -113,10 +133,9 @@ def summarise_document(openai_client: OpenAI, document_text: str, application_da
         and PDF documents on planning applications. You provide a clear plain-English
         summary of the information based on the prompt given."""
         prompt = f"""
-        Analyze the following text from a PDF document and related information. Then, create
-        a concise summary of what is being proposed and why it might matter. The summary should
-        be written in clear and simple language, suitable for a general audience in less than
-        a 100 words. Do not add any links for more information.
+        Analyze the following text from a PDF document and related information. Then create
+         a concise summary of what is being proposed and why it might matter. The summary
+         should use clear, simple language, stay under 100 words, and contain no links.
 
         The information is stored as a dictionary with keys:
         - "address": The address of the planning application.
@@ -175,7 +194,7 @@ def summarise_document(openai_client: OpenAI, document_text: str, application_da
 if __name__ == "__main__":
     session = create_boto3_session()
     uid = "Greenwich_26_2646_SD"
-    metadata = load_data(session, uid)
+    metadata = load_data_by_uid(session, uid)
     if metadata:
         logger.info("Metadata loaded successfully")
         data = {
@@ -189,7 +208,8 @@ if __name__ == "__main__":
     else:
         logger.error("Metadata not found.")
         data = {}
-    document = load_document(session, uid)
+    documents = load_documents(session)
+    document = find_document_by_uid(session, documents, uid)
     if document:
         logger.info(f"Document loaded successfully")
         pdf_text = extract_pdf_text(document)
