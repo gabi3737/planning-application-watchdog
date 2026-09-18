@@ -219,7 +219,7 @@ resource "aws_iam_role_policy_attachment" "schedule_etl_role_policy_connection" 
 resource "aws_scheduler_schedule" "etl-schedule" {
   name                         = "c25-planning-etl-schedule"
   group_name                   = "default"
-  schedule_expression          = "cron(0 10 * * ? *)"
+  schedule_expression          = "cron(0 2 * * ? *)"
   schedule_expression_timezone = "Europe/London"
 
   flexible_time_window {
