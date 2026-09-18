@@ -608,10 +608,8 @@ def get_latest_application_summary(session: boto3.Session, map_data: dict, docum
     latest_app_info = map_data.get(
         "last_object_clicked_popup") if map_data else None
 
-    if latest_app_info:
+    if latest_app_info and "UID" in latest_app_info:
         latest_app_info = convert_info_to_dict(latest_app_info)
-
-    if latest_app_info:
         st.success(f"Application UID: **{latest_app_info['uid']}**")
         with st.spinner("Generating summary..."):
             summary = get_ai_summary(session, latest_app_info, documents)
