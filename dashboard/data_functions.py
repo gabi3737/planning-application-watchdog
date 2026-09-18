@@ -110,6 +110,7 @@ def load_application_data(_session: boto3.Session) -> pd.DataFrame:
         df["start_date"] = pd.to_datetime(
             df["start_date"],
             errors="coerce")
+        print(df.columns)
         return df
 
     except (ClientError, BotoCoreError) as aws_err:
@@ -155,11 +156,6 @@ def load_application_documents(s3_client: boto3.client, bucket_name: str, uid: s
     if not file_found:
         raise FileNotFoundError(
             f"No documents found for application UID '{uid}' in bucket '{bucket_name}'.")
-
-
-def load_csv_data() -> pd.DataFrame:
-    # Postcode column for CSV data remains invalid
-    ...
 
 
 def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:

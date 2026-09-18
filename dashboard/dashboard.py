@@ -1,4 +1,5 @@
 """GeoSpatial Analytical Dashboard for the Planning Application Watchdog."""
+from concurrent.interpreters import create
 import logging
 import math
 import streamlit as st
@@ -8,11 +9,13 @@ from curl_cffi import requests
 from requests.exceptions import HTTPError
 from dotenv import load_dotenv
 import pandas as pd
+import boto3
 
 from data_functions import (calculate_distance, get_sites,
                             get_conservation_areas, create_boto3_session,
                             load_application_data, get_coords)
 
+from ai_summary_functions import (load_documents, get_ai_summary)
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO,
@@ -21,33 +24,6 @@ logging.basicConfig(level=logging.INFO,
 
 logger = logging.getLogger(__name__)
 
-FAKE_APPLICATIONS = [{
-    "name": "1",
-    "latitude": 51.509,
-    "longitude": -0.128
-},
-    {
-    "name": "2",
-    "latitude": 51.507,
-    "longitude": -0.128
-},
-    {
-    "name": "3",
-    "latitude": 51.507,
-    "longitude": -0.125
-}]
-
-
-# def select_parameters() -> tuple[float, float, int]:
-#     """Displays sidebar inputs for latitude, longitude, and radius."""
-#     st.sidebar.header("📊 Visualization Controls")
-#     latitude = st.sidebar.number_input(
-#         "Latitude", value=51.54, step=0.0001, format="%.5f")
-#     longitude = st.sidebar.number_input(
-#         "Longitude", value=0.05, step=0.0001, format="%.5f")
-#     radius = st.sidebar.number_input("Radius (m)", value=100)
-#     return latitude, longitude, radius
-
 
 def add_sites_to_map(m: folium.Map, sites: list) -> folium.Map:
     """Adds heritage sites to the map."""
@@ -55,8 +31,8 @@ def add_sites_to_map(m: folium.Map, sites: list) -> folium.Map:
         folium.Marker(
             location=[site["geometry"]["points"]
                       [0][1], site["geometry"]["points"][0][0]],
-            popup=f"""Heritage Site: {site['attributes']['Name']}, 
-            Grade: {site['attributes']['Grade']}, 
+            popup=f"""Heritage Site: {site['attributes']['Name']},
+            Grade: {site['attributes']['Grade']},
             Link: {site['attributes']['hyperlink']}""",
             icon=folium.Icon(color="blue", icon="tower")
         ).add_to(m)
@@ -74,28 +50,60 @@ def add_areas_to_map(m: folium.Map, areas: list) -> folium.Map:
             popup=f"""Conservation Area: {area['properties']['NAME']}""",
             color="green",
             fill=True,
-            fill_color="green"
+            fill_color="green",
+            dash_array="3, 5",
+            weight=1.5,
         ).add_to(m)
     return m
 
 
+def load_application_html(application: dict):
+    return f"""
+            <div style="font-family: Arial, sans-serif; width: 280px; padding: 12px;">
+                <h3 style="margin: 0 0 12px 0; color: #2c3e50; font-size: 16px; 
+                border-bottom: 2px solid #3498db; padding-bottom: 8px;">
+                    {application.get('address', 'Unavailable')}
+                </h3>
+                <div style="margin: 10px 0;">
+                    <p style="margin: 6px 0; font-size: 13px;">
+                        <b style="color: #34495e;">Application Type:</b> 
+                        <span style="color: #555;">{application.get('app_type', 'Unavailable')}</span>
+                    </p>
+                    <p style="margin: 6px 0; font-size: 13px;">
+                        <b style="color: #34495e;">Application Size:</b> 
+                        <span style="color: #555;">{application.get('app_size', 'Unavailable')}</span>
+                    </p>
+                    <p style="margin: 6px 0; font-size: 13px;">
+                        <b style="color: #34495e;">UID:</b> 
+                        <span style="color: #555; font-family: monospace;">{application.get('uid', 'Unavailable')}</span>
+                    </p>
+                </div>
+            </div>
+            """
+
+
 def add_applications_to_map(m: folium.Map, latitude: float, longitude: float,
-                            radius: int, coords_df: pd.DataFrame) -> folium.Map:
+                            radius: int, coords_df: pd.DataFrame,
+                            applications_df: pd.DataFrame, documents: dict,
+                            _session) -> folium.Map:
     """Adds planning applications to the map based on their coordinates."""
-    for _, row in coords_df.iterrows():
+    for idx, row in coords_df.iterrows():
         distance = calculate_distance(
             latitude, longitude, row["location_y"], row["location_x"])
         if distance <= radius:
+            app = applications_df.iloc[idx].to_dict()
+            popup_html = load_application_html(app)
             folium.Marker(
                 location=[row["location_y"], row["location_x"]],
-                popup=f"Application: ({row['location_y']}, {row['location_x']})",
+                popup=folium.Popup(popup_html, max_width=250),
                 icon=folium.Icon(color="green", icon="home")
             ).add_to(m)
     return m
 
 
 def create_map(latitude: float, longitude: float, radius: int,
-               sites: list, areas: list, coords_df: pd.DataFrame) -> folium.Map:
+               sites: list, areas: list, coords_df: pd.DataFrame,
+               applications: pd.DataFrame, documents: dict, session: boto3.Session) -> folium.Map:
     """Creates and populates the Map with planning applications and heritage sites."""
     m = folium.Map(location=[latitude, longitude], zoom_start=18)
 
@@ -107,8 +115,8 @@ def create_map(latitude: float, longitude: float, radius: int,
 
     m = add_sites_to_map(m, sites)
     m = add_areas_to_map(m, areas)
-    m = add_applications_to_map(m, latitude, longitude, radius, coords_df)
-
+    m = add_applications_to_map(m, latitude, longitude, radius, coords_df,
+                                applications, documents, session)
     folium.Circle(
         location=[latitude, longitude],
         radius=radius,
@@ -122,12 +130,12 @@ def create_map(latitude: float, longitude: float, radius: int,
 
 def render_page() -> None:
     """Renders the page title, config, and introductory text."""
-    st.title("Planning Application Watchdog")
     st.set_page_config(
         page_title="Planning Application Watchdog",
         page_icon="🏠",
         layout="wide",
     )
+    st.title("Planning Application Watchdog")
 
     st.write(
         "Welcome to the Planning Application Watchdog. "
@@ -188,12 +196,13 @@ def resolve_selected_location(use_map_click: bool, latitude: float,
     return latitude, longitude
 
 
-def load_map_data(lat: float, lon: float, radius: int) -> tuple[list, list, pd.DataFrame]:
-    """Fetches heritage sites, conservation areas, and planning application coordinates."""
+@st.cache_data
+def load_map_data(lat: float, lon: float, radius: int, _session: boto3.Session) -> tuple[list, list, pd.DataFrame]:
+    """Fetches heritage sites, conservation areas, and planning application."""
     sites = get_sites(lat, lon, radius)
     areas = get_conservation_areas(lat, lon, radius)
-    coords = get_coords(load_application_data(create_boto3_session()))
-    return sites, areas, coords
+    applications = load_application_data(_session)
+    return sites, areas, applications
 
 
 def update_click_selection(use_map_click: bool, map_data: dict) -> None:
@@ -202,6 +211,50 @@ def update_click_selection(use_map_click: bool, map_data: dict) -> None:
         clicked = map_data["last_clicked"]
         st.session_state.selected_lat = clicked["lat"]
         st.session_state.selected_lon = clicked["lng"]
+
+
+def display_summary_selection(applications: pd.DataFrame, session: boto3.Session, documents: dict) -> None:
+    st.divider()
+    st.header("📋 Application Summary")
+
+    col1, col2 = st.columns([3, 1], gap="small")
+    with col1:
+        selected_uid = st.text_input(
+            "Enter Application UID to get summary:",
+            value=st.session_state.get('selected_uid', ''),
+            key='uid_input'
+        )
+    with col2:
+        st.write("")
+        get_summary_btn = st.button("Get Summary", use_container_width=True)
+
+    if get_summary_btn:
+        if selected_uid:
+            matching_app = applications[applications['uid'] == selected_uid]
+            if not matching_app.empty:
+                app = matching_app.iloc[0].to_dict()
+                with st.spinner("Generating summary..."):
+                    summary = get_ai_summary(session, app, documents)
+                    st.markdown(
+                        f"<div style='background-color: #27ae60; padding: 15px; border-radius: 5px; color: white;'>"
+                        f"✅ <b>Summary:</b> {summary}"
+                        f"</div>",
+                        unsafe_allow_html=True
+                    )
+            else:
+                st.markdown(
+                    f"<div style='background-color: #c0392b; padding: 15px; border-radius: 5px; color: white;'>"
+                    f"❌ <b>Application UID not found</b>"
+                    f"</div>",
+                    unsafe_allow_html=True
+                )
+        else:
+            st.markdown(
+                f"<div style='background-color: #c0392b; padding: 15px; border-radius: 5px; color: white;'>"
+                f"❌ <b>Please enter a UID</b>"
+                f"</div>",
+                unsafe_allow_html=True
+            )
 
 
 def main() -> None:
@@ -214,12 +267,19 @@ def main() -> None:
 
     st.write(f"Selected Location: ({lat:.5f}, {lon:.5f})")
 
-    sites, areas, coords = load_map_data(lat, lon, radius)
+    session = create_boto3_session()
+    documents = load_documents(session)
 
-    m = create_map(lat, lon, radius, sites, areas, coords)
+    sites, areas, applications = load_map_data(lat, lon, radius, session)
+    coords = get_coords(applications)
+
+    m = create_map(lat, lon, radius, sites, areas,
+                   coords, applications, documents, session)
     map_data = st_folium(m, width=900, height=600, key="analysis_map")
 
     update_click_selection(use_map_click, map_data)
+
+    display_summary_selection(applications, session, documents)
 
 
 if __name__ == "__main__":
