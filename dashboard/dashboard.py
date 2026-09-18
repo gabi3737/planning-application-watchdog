@@ -120,12 +120,29 @@ def create_map(latitude: float, longitude: float, radius: int,
 
 def render_page() -> None:
     """Renders the page title, config, and introductory text."""
-    st.title("Planning Application Watchdog")
     st.set_page_config(
         page_title="Planning Application Watchdog",
         page_icon="🏠",
         layout="wide",
     )
+
+    logo_col, title_col = st.columns([1, 6], vertical_alignment="center")
+    with logo_col:
+        st.markdown(
+            """
+            <style>
+            /* Downscaling a large source image with a lower-quality algorithm causes blur; force high-quality resampling */
+            [data-testid="stImage"] img {
+                image-rendering: -webkit-optimize-contrast;
+                image-rendering: high-quality;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.image("./assets/planwatch.png", width=240)
+    with title_col:
+        st.title("Planning Application Watchdog")
 
     st.write(
         "Welcome to the Planning Application Watchdog. "
