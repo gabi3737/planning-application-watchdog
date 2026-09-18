@@ -24,9 +24,7 @@ data "aws_iam_policy_document" "ecs_dashboard_permissions_policy_doc" {
   statement {
     effect = "Allow"
     actions = [
-      "s3:GetObject",
-      "s3:PutObject",
-      "s3:DeleteObject"
+      "s3:GetObject"
     ]
     resources = ["${aws_s3_bucket.c25_planning_files_bucket.arn}/*"]
   }
@@ -44,12 +42,10 @@ data "aws_iam_policy_document" "ecs_dashboard_permissions_policy_doc" {
   statement {
     effect = "Allow"
     actions = [
-      "dynamodb:PutItem",
       "dynamodb:GetItem",
       "dynamodb:Query",
       "dynamodb:Scan",
-      "dynamodb:UpdateItem",
-      "dynamodb:DeleteItem"
+      "dynamodb:DescribeTable"
     ]
     resources = [aws_dynamodb_table.c25_planning_data_db.arn]
   }
@@ -62,7 +58,8 @@ data "aws_iam_policy_document" "ecs_dashboard_permissions_policy_doc" {
       "dynamodb:Query",
       "dynamodb:Scan",
       "dynamodb:UpdateItem",
-      "dynamodb:DeleteItem"
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable"
     ]
     resources = [aws_dynamodb_table.c25_planning_user_db.arn]
   }
