@@ -8,7 +8,8 @@ from curl_cffi import requests
 from requests.exceptions import HTTPError
 from dotenv import load_dotenv
 
-from data_functions import calculate_distance, get_sites, get_conservation_areas
+from data_functions import (calculate_distance, get_sites, get_conservation_areas,
+                            get_planning_applications_by_area, APP_TYPE_COLORS, create_boto3_session)
 from dynamodb_functions import subscribe_user
 import re
 
@@ -19,22 +20,6 @@ logging.basicConfig(level=logging.INFO,
                     datefmt="%Y-%m-%d %H:%M:%S")
 
 logger = logging.getLogger(__name__)
-
-FAKE_APPLICATIONS = [{
-    "name": "1",
-    "latitude": 51.509,
-    "longitude": -0.128
-},
-    {
-    "name": "2",
-    "latitude": 51.507,
-    "longitude": -0.128
-},
-    {
-    "name": "3",
-    "latitude": 51.507,
-    "longitude": -0.125
-}]
 
 
 # def select_parameters() -> tuple[float, float, int]:
@@ -48,17 +33,34 @@ FAKE_APPLICATIONS = [{
 #     return latitude, longitude, radius
 
 
-def add_applications_to_map(m: folium.Map, latitude: float, longitude: float,
-                            radius: int, fake_applications: list) -> None:
-    for app in fake_applications:
-        distance = calculate_distance(
-            latitude, longitude, app["latitude"], app["longitude"])
-        if distance <= radius:
-            folium.Marker(
-                location=[app["latitude"], app["longitude"]],
-                popup=f"Application {app['name']}: ({app['latitude']}, {app['longitude']})",
-                icon=folium.Icon(color="green", icon="home")
-            ).add_to(m)
+def add_applications_to_map(m: folium.Map, applications: list) -> folium.Map:
+    """Adds planning applications to the map with color-coded markers by application type."""
+    for app in applications:
+        # Determine marker color based on application type
+        app_type = app.get("app_type", "Unknown")
+        color = APP_TYPE_COLORS.get(app_type, "gray")
+
+        # Build popup content with application details
+        uid = app.get("uid", "N/A")
+        address = app.get("address", "N/A")
+        app_state = app.get("app_state", "N/A")
+        url = app.get("url", "#")
+
+        popup_text = f"""
+        <b>Application: {uid}</b><br>
+        <b>Address:</b> {address}<br>
+        <b>Type:</b> {app_type}<br>
+        <b>Status:</b> {app_state}<br>
+        <a href="{url}" target="_blank">View on Council Website</a>
+        """
+
+        folium.Marker(
+            location=[app["location_y"], app["location_x"]],
+            popup=folium.Popup(popup_text, max_width=300),
+            icon=folium.Icon(color=color, icon="file", prefix="fa"),
+            tooltip=f"{uid} - {address}"
+        ).add_to(m)
+
     return m
 
 
@@ -91,7 +93,7 @@ def add_areas_to_map(m: folium.Map, areas: list) -> folium.Map:
 
 
 def create_map(latitude: float, longitude: float, radius: int,
-               fake_applications: list, sites: list, areas: list) -> folium.Map:
+               applications: list, sites: list, areas: list) -> folium.Map:
     """Creates and populates the Map with planning applications and heritage sites."""
     m = folium.Map(location=[latitude, longitude], zoom_start=18)
 
@@ -101,8 +103,7 @@ def create_map(latitude: float, longitude: float, radius: int,
         icon=folium.Icon(color="red", icon="info-sign")
     ).add_to(m)
 
-    m = add_applications_to_map(
-        m, latitude, longitude, radius, fake_applications)
+    m = add_applications_to_map(m, applications)
 
     m = add_sites_to_map(m, sites)
     m = add_areas_to_map(m, areas)
@@ -145,27 +146,28 @@ if __name__ == "__main__":
     # Sidebar controls
     st.sidebar.header("📊 Visualization Controls")
 
-    use_map_click = st.sidebar.checkbox(
-        "Use click to set location",
-        value=False,
-        help="When enabled, clicking on the map will set latitude and longitude",
-    )
+    # Initialize map center in session state if needed
+    if "map_center_lat" not in st.session_state:
+        st.session_state.map_center_lat = 51.54
+    if "map_center_lon" not in st.session_state:
+        st.session_state.map_center_lon = -0.05
 
-    latitude = st.sidebar.number_input(
-        "Latitude",
-        value=51.54,
-        step=0.0001,
-        format="%.5f",
-        disabled=use_map_click,
+    # Display current map center
+    st.sidebar.metric("Map Center Latitude",
+                      f"{st.session_state.map_center_lat:.5f}", delta=None)
+    st.sidebar.metric("Map Center Longitude",
+                      f"{st.session_state.map_center_lon:.5f}", delta=None)
+
+    radius = st.sidebar.number_input(
+        "Search Radius (m)", value=100, min_value=0)
+
+    # Planning applications filter
+    st.sidebar.divider()
+    filter_by_area = st.sidebar.checkbox(
+        "Filter planning applications by area",
+        value=False,
+        help="When enabled, only shows applications from your selected area"
     )
-    longitude = st.sidebar.number_input(
-        "Longitude",
-        value=0.05,
-        step=0.0001,
-        format="%.5f",
-        disabled=use_map_click,
-    )
-    radius = st.sidebar.number_input("Radius (m)", value=100, min_value=0)
 
     # Subscriber form section
     st.sidebar.divider()
@@ -198,28 +200,36 @@ if __name__ == "__main__":
             else:
                 st.sidebar.error(result['message'])
 
-    if "selected_lat" not in st.session_state:
-        st.session_state.selected_lat = latitude
-    if "selected_lon" not in st.session_state:
-        st.session_state.selected_lon = longitude
+    lat = st.session_state.map_center_lat
+    lon = st.session_state.map_center_lon
 
-    if use_map_click:
-        lat = st.session_state.selected_lat
-        lon = st.session_state.selected_lon
-    else:
-        lat = latitude
-        lon = longitude
-
-    st.write(f"Selected Location: ({lat:.5f}, {lon:.5f})")
+    # Load planning applications from DynamoDB
+    try:
+        session = create_boto3_session()
+        area_filter = area if filter_by_area else None
+        applications = get_planning_applications_by_area(
+            session, lat, lon, radius, area_name=area_filter
+        )
+        if not applications:
+            st.info(
+                "ℹ️ No planning applications found in the selected area and radius.")
+    except ValueError as e:
+        st.error(f"⚠️ Configuration Error: {str(e)}")
+        applications = []
+    except Exception as e:
+        st.error(f"⚠️ Error loading applications: {str(e)}")
+        applications = []
 
     sites = get_sites(lat, lon, radius)
     areas = get_conservation_areas(lat, lon, radius)
 
-    m = create_map(lat, lon, radius, FAKE_APPLICATIONS, sites, areas)
+    m = create_map(lat, lon, radius, applications, sites, areas)
 
     map_data = st_folium(m, width=900, height=600, key="analysis_map")
 
-    if use_map_click and map_data and "last_clicked" in map_data and map_data["last_clicked"]:
-        clicked = map_data["last_clicked"]
-        st.session_state.selected_lat = clicked["lat"]
-        st.session_state.selected_lon = clicked["lng"]
+    # Update map center based on map movement (like Google Maps)
+    if map_data and "center" in map_data:
+        st.session_state.map_center_lat = map_data["center"]["lat"]
+        st.session_state.map_center_lon = map_data["center"]["lng"]
+        # Rerun the app to update data based on new map center
+        st.rerun()
