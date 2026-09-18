@@ -603,7 +603,8 @@ def build_folium_map(df, heritage_sites, conservation_areas, filters, documents)
 
 
 def get_latest_application_summary(session: boto3.Session, map_data: dict, documents: dict) -> str:
-    st.subheader("Summary")
+    st.subheader(
+        "Summary", help="AI-generated summary of the most recently selected planning application on the map.")
     latest_app_info = map_data.get(
         "last_object_clicked_popup") if map_data else None
 
