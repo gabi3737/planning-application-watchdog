@@ -10,6 +10,8 @@ from dotenv import load_dotenv
 import pandas as pd
 
 
+from data_functions import (calculate_distance, get_sites, get_conservation_areas,
+                            get_planning_applications_by_area, APP_TYPE_COLORS, create_boto3_session)
 from dynamodb_functions import subscribe_user
 import re
 from data_functions import (calculate_distance, get_sites,
@@ -24,22 +26,6 @@ logging.basicConfig(level=logging.INFO,
 
 logger = logging.getLogger(__name__)
 
-FAKE_APPLICATIONS = [{
-    "name": "1",
-    "latitude": 51.509,
-    "longitude": -0.128
-},
-    {
-    "name": "2",
-    "latitude": 51.507,
-    "longitude": -0.128
-},
-    {
-    "name": "3",
-    "latitude": 51.507,
-    "longitude": -0.125
-}]
-
 
 # def select_parameters() -> tuple[float, float, int]:
 #     """Displays sidebar inputs for latitude, longitude, and radius."""
@@ -50,6 +36,37 @@ FAKE_APPLICATIONS = [{
 #         "Longitude", value=0.05, step=0.0001, format="%.5f")
 #     radius = st.sidebar.number_input("Radius (m)", value=100)
 #     return latitude, longitude, radius
+
+
+def add_applications_to_map(m: folium.Map, applications: list) -> folium.Map:
+    """Adds planning applications to the map with color-coded markers by application type."""
+    for app in applications:
+        # Determine marker color based on application type
+        app_type = app.get("app_type", "Unknown")
+        color = APP_TYPE_COLORS.get(app_type, "gray")
+
+        # Build popup content with application details
+        uid = app.get("uid", "N/A")
+        address = app.get("address", "N/A")
+        app_state = app.get("app_state", "N/A")
+        url = app.get("url", "#")
+
+        popup_text = f"""
+        <b>Application: {uid}</b><br>
+        <b>Address:</b> {address}<br>
+        <b>Type:</b> {app_type}<br>
+        <b>Status:</b> {app_state}<br>
+        <a href="{url}" target="_blank">View on Council Website</a>
+        """
+
+        folium.Marker(
+            location=[app["location_y"], app["location_x"]],
+            popup=folium.Popup(popup_text, max_width=300),
+            icon=folium.Icon(color=color, icon="file", prefix="fa"),
+            tooltip=f"{uid} - {address}"
+        ).add_to(m)
+
+    return m
 
 
 def add_sites_to_map(m: folium.Map, sites: list) -> folium.Map:
@@ -105,6 +122,8 @@ def create_map(latitude: float, longitude: float, radius: int,
         popup=f"Center: ({latitude}, {longitude})",
         icon=folium.Icon(color="red", icon="info-sign")
     ).add_to(m)
+
+    m = add_applications_to_map(m, applications)
 
     m = add_sites_to_map(m, sites)
     m = add_areas_to_map(m, areas)
@@ -167,27 +186,28 @@ def render_sidebar_controls() -> tuple[bool, float, float, int]:
     """Displays sidebar inputs and returns use_map_click, latitude, longitude, and radius."""
     st.sidebar.header("📊 Visualization Controls")
 
-    use_map_click = st.sidebar.checkbox(
-        "Use click to set location",
-        value=False,
-        help="When enabled, clicking on the map will set latitude and longitude",
-    )
+    # Initialize map center in session state if needed
+    if "map_center_lat" not in st.session_state:
+        st.session_state.map_center_lat = 51.54
+    if "map_center_lon" not in st.session_state:
+        st.session_state.map_center_lon = -0.05
 
-    latitude = st.sidebar.number_input(
-        "Latitude",
-        value=51.54,
-        step=0.0001,
-        format="%.5f",
-        disabled=use_map_click,
+    # Display current map center
+    st.sidebar.metric("Map Center Latitude",
+                      f"{st.session_state.map_center_lat:.5f}", delta=None)
+    st.sidebar.metric("Map Center Longitude",
+                      f"{st.session_state.map_center_lon:.5f}", delta=None)
+
+    radius = st.sidebar.number_input(
+        "Search Radius (m)", value=100, min_value=0)
+
+    # Planning applications filter
+    st.sidebar.divider()
+    filter_by_area = st.sidebar.checkbox(
+        "Filter planning applications by area",
+        value=False,
+        help="When enabled, only shows applications from your selected area"
     )
-    longitude = st.sidebar.number_input(
-        "Longitude",
-        value=0.05,
-        step=0.0001,
-        format="%.5f",
-        disabled=use_map_click,
-    )
-    radius = st.sidebar.number_input("Radius (m)", value=100, min_value=0)
 
     # Subscriber form section
     st.sidebar.divider()

@@ -19,6 +19,19 @@ logging.basicConfig(level=logging.INFO,
 
 logger = logging.getLogger(__name__)
 
+# Application type to marker color mapping
+APP_TYPE_COLORS = {
+    "Full": "orange",
+    "Outline": "yellow",
+    "Amendment": "purple",
+    "Conditions": "blue",
+    "Trees": "green",
+    "Compliance": "red",
+    "Listed Building": "darkblue",
+    "Work to Trees": "darkgreen",
+    "Non-Material Amendment": "gray",
+}
+
 
 def create_boto3_session() -> boto3.Session:
     """Creates and returns a boto3 session using environment variables for AWS credentials and region."""
@@ -127,6 +140,64 @@ def load_application_data(_session: boto3.Session) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+@st.cache_data
+def get_planning_applications_by_area(_session: boto3.Session, latitude: float, 
+                                      longitude: float, radius: int, area_name: str = None) -> list:
+    """
+    Fetch planning applications from DynamoDB and filter by area and distance.
+    
+    Args:
+        _session: boto3 session for AWS access (prefixed with _ to exclude from cache key)
+        latitude: center point latitude
+        longitude: center point longitude
+        radius: search radius in meters
+        area_name: optional area name to filter (Tower Hamlets, Newham, Greenwich)
+        
+    Returns:
+        List of applications within the radius, optionally filtered by area
+    """
+    try:
+        # Load all applications from DynamoDB
+        df = load_application_data(_session)
+        
+        if df.empty:
+            return []
+        
+        # Filter by area if specified
+        if area_name:
+            df = df[df["area_name"] == area_name]
+            
+        if df.empty:
+            return []
+        
+        # Filter by distance
+        applications = []
+        for _, row in df.iterrows():
+            distance = calculate_distance(
+                latitude, longitude, 
+                float(row.get("location_y", 0)), 
+                float(row.get("location_x", 0))
+            )
+            if distance <= radius:
+                applications.append({
+                    "uid": row.get("uid", "N/A"),
+                    "address": row.get("address", "N/A"),
+                    "app_type": row.get("app_type", "Unknown"),
+                    "app_state": row.get("app_state", "N/A"),
+                    "location_x": float(row.get("location_x", 0)),
+                    "location_y": float(row.get("location_y", 0)),
+                    "url": row.get("url", "#"),
+                    "area_name": row.get("area_name", "N/A")
+                })
+        
+        logger.info(f"Found {len(applications)} planning applications within {radius}m of ({latitude}, {longitude})")
+        return applications
+        
+    except Exception as err:
+        logger.error(f"Error fetching planning applications: {err}")
+        return []
+      
+      
 def get_coords(df: pd.DataFrame) -> pd.DataFrame:
     """Extracts coordinates from the planning application DataFrame."""
     if "location_x" in df.columns and "location_y" in df.columns:
