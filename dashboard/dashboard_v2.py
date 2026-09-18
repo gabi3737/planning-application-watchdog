@@ -14,6 +14,7 @@ from streamlit_folium import st_folium
 import pandas as pd
 import logging
 import re
+import boto3
 from datetime import datetime, timedelta
 from data_functions import (
     load_application_data,
@@ -23,6 +24,7 @@ from data_functions import (
     create_boto3_session,
     calculate_distance,
 )
+from ai_summary_functions import load_documents, convert_info_to_dict, get_ai_summary
 from dynamodb_functions import subscribe_user
 
 # Configure logging
@@ -347,7 +349,7 @@ def setup_sidebar_filters(df):
 
 # ==================== FOLIUM MAP BUILDER ====================
 
-def build_folium_map(df, heritage_sites, conservation_areas, filters):
+def build_folium_map(df, heritage_sites, conservation_areas, filters, documents):
     """Build the folium map with all layers and features."""
 
     if df.empty:
@@ -397,12 +399,20 @@ def build_folium_map(df, heritage_sites, conservation_areas, filters):
 
     # ==================== PLANNING APPLICATIONS LAYER ====================
 
+    # Create boto3 session to read documents
+    session = create_boto3_session()
+
     if filters["show_clustering"]:
         # Use marker clustering for dense point data
         marker_cluster = MarkerCluster(
             name="Planning Applications (Clustered)").add_to(m)
 
         for idx, row in df.iterrows():
+            # Load AI summary for the current planning application
+            data = dict(row)
+            # ai_summary = get_ai_summary(session, data, documents)
+            ai_summary = "Not Available"
+
             app_type = str(row.get("app_type", "Unknown"))
             color = map_app_type_to_folium_color(app_type)
 
@@ -589,6 +599,25 @@ def build_folium_map(df, heritage_sites, conservation_areas, filters):
 
     return m
 
+# ==================== GET AI SUMMARY OF LATEST CLICKED APPLICATION ====================
+
+
+def get_latest_application_summary(session: boto3.Session, map_data: dict, documents: dict) -> str:
+    st.subheader("Summary")
+    latest_app_info = map_data.get(
+        "last_object_clicked_popup") if map_data else None
+
+    if latest_app_info:
+        latest_app_info = convert_info_to_dict(latest_app_info)
+
+    if latest_app_info:
+        st.success(f"Application UID: **{latest_app_info['uid']}**")
+        with st.spinner("Generating summary..."):
+            summary = get_ai_summary(session, latest_app_info, documents)
+            st.info(summary)
+    else:
+        st.warning("No application selected.")
+
 
 # ==================== MAIN APPLICATION ====================
 
@@ -628,16 +657,22 @@ def main():
     # Build and display map
     st.subheader("📍 Planning Applications Map")
 
+    session = create_boto3_session()
+    documents = load_documents(session)
     if df_filtered.empty:
         st.warning(
             "⚠️ No applications match your filters. Try adjusting your selection.")
     else:
         with st.spinner("🗺️ Building map..."):
             m = build_folium_map(df_filtered, heritage_sites,
-                                 conservation_areas, filters)
+                                 conservation_areas, filters, documents)
 
         if m:
-            st_folium(m, width=1400, height=700)
+            map_data = st_folium(m, width=1400, height=700, returned_objects=[
+                "last_object_clicked_popup"])
+
+    # Display summary for the latest clicked application on the map
+    get_latest_application_summary(session, map_data, documents)
 
     # Display results table
     st.subheader("📋 Filtered Results")
