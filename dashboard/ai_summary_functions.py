@@ -35,7 +35,7 @@ def create_boto3_session() -> boto3.Session:
 
 @st.cache_data
 def load_documents(_session: boto3.Session) -> dict:
-    """Load all documents from the database."""
+    """Load all documents from the S3 bucket."""
     s3_client = _session.client("s3")
 
     bucket_name = os.getenv("PLANNING_FILES_BUCKET",
