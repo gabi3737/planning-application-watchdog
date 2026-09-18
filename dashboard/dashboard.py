@@ -9,6 +9,8 @@ from requests.exceptions import HTTPError
 from dotenv import load_dotenv
 
 from data_functions import calculate_distance, get_sites, get_conservation_areas
+from dynamodb_functions import subscribe_user
+import re
 
 load_dotenv()
 
@@ -164,6 +166,37 @@ if __name__ == "__main__":
         disabled=use_map_click,
     )
     radius = st.sidebar.number_input("Radius (m)", value=100, min_value=0)
+
+    # Subscriber form section
+    st.sidebar.divider()
+    st.sidebar.header("📧 Subscribe to Alerts")
+
+    area = st.sidebar.selectbox(
+        "Select your area",
+        options=["Tower Hamlets", "Newham", "Greenwich"],
+        help="Choose which area you want to monitor for planning applications"
+    )
+
+    email = st.sidebar.text_input(
+        "Enter your email address",
+        placeholder="your.email@example.com",
+        help="We'll send you alerts about planning applications in your area"
+    )
+
+    if st.sidebar.button("Subscribe", use_container_width=True):
+        # Email validation
+        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if not email or not re.match(email_pattern, email):
+            st.sidebar.error("Please enter a valid email address")
+        elif not area:
+            st.sidebar.error("Please select an area")
+        else:
+            # Submit to DynamoDB
+            result = subscribe_user(area, email)
+            if result['success']:
+                st.sidebar.success(result['message'])
+            else:
+                st.sidebar.error(result['message'])
 
     if "selected_lat" not in st.session_state:
         st.session_state.selected_lat = latitude
