@@ -2,6 +2,7 @@
 omit =
     dashboard/dashboard.py
     dashboard/test_data_functions.py
+    dashboard/test_ai_summary_functions.py
     pipeline/tests/test_extract.py
     pipeline/tests/test_transform.py
     pipeline/test_save_documents.py

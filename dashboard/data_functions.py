@@ -196,6 +196,14 @@ def get_planning_applications_by_area(_session: boto3.Session, latitude: float,
     except Exception as err:
         logger.error(f"Error fetching planning applications: {err}")
         return []
+      
+      
+def get_coords(df: pd.DataFrame) -> pd.DataFrame:
+    """Extracts coordinates from the planning application DataFrame."""
+    if "location_x" in df.columns and "location_y" in df.columns:
+        if isinstance(df["location_x"].iloc[0], (float)) and isinstance(df["location_y"].iloc[0], (float)):
+            return df[["location_x", "location_y"]].copy()
+    return pd.DataFrame()
 
 
 def set_s3_client(session: boto3.Session) -> boto3.client:
