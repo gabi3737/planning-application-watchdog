@@ -426,7 +426,7 @@ if __name__ == "__main__":
     dfs = main(args.start_date, args.end_date, args.save_pdf)
     logger.info(f"Extraction complete. Extracted {len(dfs)} area datasets:"
                 f" {', '.join(dfs.keys())}")
-    
+
     if args.save_csv:
         logger.info("Saving data to CSV files...")
         for area_name, df in dfs.items():
