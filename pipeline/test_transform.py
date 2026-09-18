@@ -13,8 +13,8 @@ from transform import (
     validate_required_fields,
     validate_coordinate_ranges,
     validate_data,
-    transform,
 )
+import transform
 
 
 @pytest.fixture
