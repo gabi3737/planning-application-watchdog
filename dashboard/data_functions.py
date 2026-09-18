@@ -77,13 +77,13 @@ def get_conservation_areas(latitude: float, longitude: float, radius: int) -> li
 
 
 @st.cache_data
-def load_application_data(session: boto3.Session) -> pd.DataFrame:
+def load_application_data(_session: boto3.Session) -> pd.DataFrame:
     """Load planning application data from DynamoDB."""
     table_name = os.getenv(
         "PLANNING_TABLE_NAME", "c25-planning-data-db")
 
     try:
-        dynamodb = session.resource("dynamodb")
+        dynamodb = _session.resource("dynamodb")
         table = dynamodb.Table(table_name)
 
         response = table.scan()
@@ -125,6 +125,14 @@ def load_application_data(session: boto3.Session) -> pd.DataFrame:
         st.error(
             "⚠️ An unexpected error occurred while processing planning application data.")
         return pd.DataFrame()
+
+
+def get_coords(df: pd.DataFrame) -> pd.DataFrame:
+    """Extracts coordinates from the planning application DataFrame."""
+    if "location_x" in df.columns and "location_y" in df.columns:
+        if isinstance(df["location_x"].iloc[0], (float)) and isinstance(df["location_y"].iloc[0], (float)):
+            return df[["location_x", "location_y"]].copy()
+    return pd.DataFrame()
 
 
 def set_s3_client(session: boto3.Session) -> boto3.client:
