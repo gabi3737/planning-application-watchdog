@@ -258,7 +258,7 @@ def extract_from_record(app: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     extracted = {
         "uid": app.get("name"),  # e.g., "Newham/26/01919/CLP"
         "address": app.get("address"),
-        "postcode": other.get("postcode") or other.get("agent_address", "").split()[-1] if other.get("agent_address") else None,
+        "postcode": app.get("postcode"),
         "app_type": app.get("app_type"),
         "app_state": app.get("app_state"),
         "app_size": app.get("app_size"),
@@ -415,6 +415,8 @@ if __name__ == "__main__":
                         help="Download PDFs for each application")
     parser.add_argument("--local", action="store_true",
                         help="Save PDFs locally instead of uploading to S3")
+    parser.add_argument("--save-csv", action="store_true",
+                        help="Save extracted data to CSV files")
     args = parser.parse_args()
 
     if args.local:
@@ -424,3 +426,10 @@ if __name__ == "__main__":
     dfs = main(args.start_date, args.end_date, args.save_pdf)
     logger.info(f"Extraction complete. Extracted {len(dfs)} area datasets:"
                 f" {', '.join(dfs.keys())}")
+    
+    if args.save_csv:
+        logger.info("Saving data to CSV files...")
+        for area_name, df in dfs.items():
+            csv_path = DATA_DIR / f"{area_name}.csv"
+            df.to_csv(csv_path, index=False)
+            logger.info(f"Saved {len(df)} records to {csv_path}")
