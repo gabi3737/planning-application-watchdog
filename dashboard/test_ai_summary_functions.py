@@ -32,8 +32,7 @@ def test_load_documents_invalid_bucket_name(mock_session):
 
 @patch("ai_summary_functions.boto3.Session")
 def test_find_document_uid_not_found(mock_session):
-    """Test that load_document returns None when UID is not found in S3."""
-    # Mock the S3 client
+    """Test that find_document_by_uid returns None when UID is not found in S3."""
     mock_s3_client = mock_session.return_value.client.return_value
 
     # Mock list_objects to return objects that don't match the UID
