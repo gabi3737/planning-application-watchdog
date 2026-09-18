@@ -150,8 +150,8 @@ resource "aws_ecs_task_definition" "ecs_dashboard_task" {
   family                   = "c25-planning-dashboard-task"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
-  cpu                      = "256"
-  memory                   = "512"
+  cpu                      = "1024"
+  memory                   = "2056"
   execution_role_arn       = aws_iam_role.ecs_dashboard_role.arn
   task_role_arn            = aws_iam_role.ecs_dashboard_role.arn
 
