@@ -13,6 +13,7 @@ from folium.plugins import MarkerCluster
 from streamlit_folium import st_folium
 import pandas as pd
 import logging
+import re
 from datetime import datetime, timedelta
 from data_functions import (
     load_application_data,
@@ -20,7 +21,9 @@ from data_functions import (
     get_conservation_areas,
     APP_TYPE_COLORS,
     create_boto3_session,
+    calculate_distance,
 )
+from dynamodb_functions import subscribe_user
 
 # Configure logging
 logging.basicConfig(level=logging.INFO,
@@ -62,6 +65,30 @@ def map_app_type_to_folium_color(app_type: str) -> str:
         color = color_mapping.get(color, "gray")
     return color
 
+
+def find_nearby_heritage_sites(lat: float, lon: float, heritage_sites: list, radius_meters: float = 100) -> list:
+    """Find heritage sites within a specified radius of a given coordinate."""
+    nearby_sites = []
+    for site in heritage_sites:
+        try:
+            if "geometry" in site and "points" in site["geometry"]:
+                points = site["geometry"]["points"]
+                if points and len(points) > 0:
+                    site_lon, site_lat = points[0][0], points[0][1]
+                    distance = calculate_distance(lat, lon, site_lat, site_lon)
+                    if distance <= radius_meters:
+                        nearby_sites.append({
+                            "distance": distance,
+                            "site": site
+                        })
+        except Exception as err:
+            logger.debug(f"Error checking heritage site proximity: {err}")
+            continue
+
+    # Sort by distance
+    nearby_sites.sort(key=lambda x: x["distance"])
+    return nearby_sites
+
 # ==================== DATA LOADING & CACHING ====================
 
 
@@ -78,22 +105,17 @@ def load_all_applications():
 
         # Ensure required columns exist
         required_cols = ["uid", "address", "app_type",
-                         "app_state", "location_x", "location_y", "start_date"]
+                         "app_state", "location_x", "location_y", "start_date", "area"]
         missing_cols = [col for col in required_cols if col not in df.columns]
         if missing_cols:
             logger.warning(f"Missing columns in DataFrame: {missing_cols}")
             for col in missing_cols:
                 df[col] = None
 
-        # Add area_name if missing (try to derive from uid or set to Unknown)
-        if "area_name" not in df.columns:
-            # Try to extract area from UID (format: "AreaName_XX_XXXXX_XX")
-            df["area_name"] = df["uid"].apply(
-                lambda x: str(x).split("_")[0] if pd.notna(
-                    x) and "_" in str(x) else "Unknown"
-            )
-
-        logger.info(f"Loaded {len(df)} planning applications")
+        # Log areas found
+        area_counts = df["area"].value_counts()
+        logger.info(
+            f"Loaded {len(df)} planning applications - Areas: {area_counts.to_dict()}")
         return df
 
     except Exception as err:
@@ -145,7 +167,7 @@ def filter_applications(df, selected_areas, selected_types, selected_statuses, d
 
     # Filter by area
     if selected_areas:
-        filtered_df = filtered_df[filtered_df["area_name"].isin(
+        filtered_df = filtered_df[filtered_df["area"].isin(
             selected_areas)]
 
     # Filter by application type
@@ -185,8 +207,8 @@ def display_metrics(df):
     # Calculate metrics
     total_apps = len(df)
 
-    areas = df["area_name"].unique() if not df.empty else []
-    area_counts = {area: len(df[df["area_name"] == area]) for area in areas}
+    areas = df["area"].unique() if not df.empty else []
+    area_counts = {area: len(df[df["area"] == area]) for area in areas}
 
     # Display metrics in columns
     cols = st.columns(len(area_counts) + 1)
@@ -209,7 +231,7 @@ def setup_sidebar_filters(df):
 
     # Area filter
     available_areas = sorted(
-        df["area_name"].unique().tolist()) if not df.empty else []
+        df["area"].unique().tolist()) if not df.empty else []
     selected_areas = st.sidebar.multiselect(
         "Council Area",
         options=available_areas,
@@ -270,8 +292,6 @@ def setup_sidebar_filters(df):
 
     # Map layer controls
     st.sidebar.subheader("🗺️ Map Layers")
-    show_heritage_sites = st.sidebar.checkbox(
-        "Heritage Sites", value=True, help="Show heritage sites from NHLE")
     show_conservation_areas = st.sidebar.checkbox(
         "Conservation Areas", value=True, help="Show conservation area boundaries")
     show_clustering = st.sidebar.checkbox(
@@ -284,13 +304,42 @@ def setup_sidebar_filters(df):
         st.cache_data.clear()
         st.rerun()
 
+    st.sidebar.divider()
+    st.sidebar.header("📧 Subscribe to Alerts")
+
+    area = st.sidebar.selectbox(
+        "Select your area",
+        options=["Tower Hamlets", "Newham", "Greenwich"],
+        help="Choose which area you want to monitor for planning applications"
+    )
+
+    email = st.sidebar.text_input(
+        "Enter your email address",
+        placeholder="your.email@example.com",
+        help="We'll send you alerts about planning applications in your area"
+    )
+
+    if st.sidebar.button("Subscribe", use_container_width=True):
+        # Email validation
+        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if not email or not re.match(email_pattern, email):
+            st.sidebar.error("Please enter a valid email address")
+        elif not area:
+            st.sidebar.error("Please select an area")
+        else:
+            # Submit to DynamoDB
+            result = subscribe_user(area, email)
+            if result['success']:
+                st.sidebar.success(result['message'])
+            else:
+                st.sidebar.error(result['message'])
+
     return {
         "selected_areas": selected_areas,
         "selected_types": selected_types,
         "selected_statuses": selected_statuses,
         "date_range": date_range,
         "search_query": search_query,
-        "show_heritage_sites": show_heritage_sites,
         "show_conservation_areas": show_conservation_areas,
         "show_clustering": show_clustering,
     }
@@ -339,6 +388,13 @@ def build_folium_map(df, heritage_sites, conservation_areas, filters):
         tiles="OpenStreetMap"
     )
 
+    # Store heritage sites in session state for popup generation
+    st.session_state.heritage_sites = heritage_sites
+
+    # Create a layer for nearby heritage sites
+    heritage_sites_layer = folium.FeatureGroup(
+        name="Nearby Heritage Sites (within 100m)", show=True).add_to(m)
+
     # ==================== PLANNING APPLICATIONS LAYER ====================
 
     if filters["show_clustering"]:
@@ -350,20 +406,66 @@ def build_folium_map(df, heritage_sites, conservation_areas, filters):
             app_type = str(row.get("app_type", "Unknown"))
             color = map_app_type_to_folium_color(app_type)
 
+            # Find nearby heritage sites within 100m
+            nearby_sites = find_nearby_heritage_sites(
+                row["location_y"], row["location_x"], heritage_sites, radius_meters=100
+            )
+
+            # Add nearby heritage sites to map layer
+            for item in nearby_sites:
+                site = item["site"]
+                distance = item["distance"]
+                attrs = site.get("attributes", {})
+
+                if "geometry" in site and "points" in site["geometry"]:
+                    points = site["geometry"]["points"]
+                    if points and len(points) > 0:
+                        site_lon, site_lat = points[0][0], points[0][1]
+
+                        heritage_popup = f"""
+                        <div style="font-family: Arial; font-size: 11px; width: 220px;">
+                            <b>{attrs.get('Name', 'Heritage Site')}</b><br>
+                            <b>Grade:</b> {attrs.get('Grade', 'N/A')}<br>
+                            <b>Distance:</b> {distance:.0f}m<br>
+                            <b>From App:</b> {row.get('uid', 'N/A')}<br>
+                            <a href="{attrs.get('hyperlink', '#')}" target="_blank">View Details</a>
+                        </div>
+                        """
+
+                        folium.Marker(
+                            location=[site_lat, site_lon],
+                            popup=folium.Popup(heritage_popup, max_width=250),
+                            tooltip=f"{attrs.get('Name', 'Heritage Site')} ({distance:.0f}m)",
+                            icon=folium.Icon(
+                                color="blue", icon="star", prefix="fa"),
+                        ).add_to(heritage_sites_layer)
+
+            # Build heritage sites section for popup
+            heritage_html = ""
+            if nearby_sites:
+                heritage_html = "<br><b>Nearby Heritage Sites (within 100m):</b><ul style='margin: 5px 0; padding-left: 20px;'>"
+                for item in nearby_sites:
+                    site = item["site"]
+                    distance = item["distance"]
+                    attrs = site.get("attributes", {})
+                    heritage_html += f"<li>{attrs.get('Name', 'Unknown')} ({distance:.0f}m)<br><small>Grade: {attrs.get('Grade', 'N/A')}</small></li>"
+                heritage_html += "</ul>"
+
             popup_html = f"""
-            <div style="font-family: Arial; font-size: 12px; width: 250px;">
+            <div style="font-family: Arial; font-size: 12px; width: 280px;">
                 <b>UID:</b> {row.get('uid', 'N/A')}<br>
                 <b>Address:</b> {row.get('address', 'N/A')}<br>
                 <b>Type:</b> {app_type}<br>
                 <b>Status:</b> {row.get('app_state', 'N/A')}<br>
-                <b>Area:</b> {row.get('area_name', 'N/A')}<br>
+                <b>Area:</b> {row.get('area', 'N/A')}<br>
                 <a href="{row.get('url', '#')}" target="_blank">View on Council Website</a>
+                {heritage_html}
             </div>
             """
 
             folium.Marker(
                 location=[row["location_y"], row["location_x"]],
-                popup=folium.Popup(popup_html, max_width=250),
+                popup=folium.Popup(popup_html, max_width=300),
                 tooltip=f"{row.get('uid', 'N/A')} - {row.get('address', 'N/A')}",
                 icon=folium.Icon(color=color, icon="info-sign"),
             ).add_to(marker_cluster)
@@ -376,71 +478,72 @@ def build_folium_map(df, heritage_sites, conservation_areas, filters):
             app_type = str(row.get("app_type", "Unknown"))
             color = map_app_type_to_folium_color(app_type)
 
+            # Find nearby heritage sites within 100m
+            nearby_sites = find_nearby_heritage_sites(
+                row["location_y"], row["location_x"], heritage_sites, radius_meters=100
+            )
+
+            # Add nearby heritage sites to map layer
+            for item in nearby_sites:
+                site = item["site"]
+                distance = item["distance"]
+                attrs = site.get("attributes", {})
+
+                if "geometry" in site and "points" in site["geometry"]:
+                    points = site["geometry"]["points"]
+                    if points and len(points) > 0:
+                        site_lon, site_lat = points[0][0], points[0][1]
+
+                        heritage_popup = f"""
+                        <div style="font-family: Arial; font-size: 11px; width: 220px;">
+                            <b>{attrs.get('Name', 'Heritage Site')}</b><br>
+                            <b>Grade:</b> {attrs.get('Grade', 'N/A')}<br>
+                            <b>Distance:</b> {distance:.0f}m<br>
+                            <b>From App:</b> {row.get('uid', 'N/A')}<br>
+                            <a href="{attrs.get('hyperlink', '#')}" target="_blank">View Details</a>
+                        </div>
+                        """
+
+                        folium.Marker(
+                            location=[site_lat, site_lon],
+                            popup=folium.Popup(heritage_popup, max_width=250),
+                            tooltip=f"{attrs.get('Name', 'Heritage Site')} ({distance:.0f}m)",
+                            icon=folium.Icon(
+                                color="blue", icon="star", prefix="fa"),
+                        ).add_to(heritage_sites_layer)
+
+            # Build heritage sites section for popup
+            heritage_html = ""
+            if nearby_sites:
+                heritage_html = "<br><b>Nearby Heritage Sites (within 100m):</b><ul style='margin: 5px 0; padding-left: 20px;'>"
+                for item in nearby_sites:
+                    site = item["site"]
+                    distance = item["distance"]
+                    attrs = site.get("attributes", {})
+                    heritage_html += f"<li>{attrs.get('Name', 'Unknown')} ({distance:.0f}m)<br><small>Grade: {attrs.get('Grade', 'N/A')}</small></li>"
+                heritage_html += "</ul>"
+
             popup_html = f"""
-            <div style="font-family: Arial; font-size: 12px; width: 250px;">
+            <div style="font-family: Arial; font-size: 12px; width: 280px;">
                 <b>UID:</b> {row.get('uid', 'N/A')}<br>
                 <b>Address:</b> {row.get('address', 'N/A')}<br>
                 <b>Type:</b> {app_type}<br>
                 <b>Status:</b> {row.get('app_state', 'N/A')}<br>
-                <b>Area:</b> {row.get('area_name', 'N/A')}<br>
+                <b>Area:</b> {row.get('area', 'N/A')}<br>
                 <a href="{row.get('url', '#')}" target="_blank">View on Council Website</a>
+                {heritage_html}
             </div>
             """
 
             folium.Marker(
                 location=[row["location_y"], row["location_x"]],
-                popup=folium.Popup(popup_html, max_width=250),
+                popup=folium.Popup(popup_html, max_width=300),
                 tooltip=f"{row.get('uid', 'N/A')} - {row.get('address', 'N/A')}",
                 icon=folium.Icon(color=color, icon="info-sign"),
             ).add_to(app_layer)
 
     # ==================== HERITAGE SITES LAYER ====================
-
-    if filters["show_heritage_sites"] and heritage_sites:
-        heritage_layer = folium.FeatureGroup(
-            name="Heritage Sites", show=True).add_to(m)
-
-        sites_added = 0
-        for idx, site in enumerate(heritage_sites):
-            try:
-                # ArcGIS API returns geometry as {'points': [[lon, lat], ...]}
-                if "geometry" in site and "points" in site["geometry"]:
-                    points = site["geometry"]["points"]
-                    if not points or len(points) == 0:
-                        logger.debug(
-                            f"Skipping site {idx}: no points in geometry")
-                        continue
-
-                    # Get first point [lon, lat]
-                    lon, lat = points[0][0], points[0][1]
-                    attrs = site.get("attributes", {})
-
-                    popup_text = f"""
-                    <div style="font-family: Arial; font-size: 12px; width: 200px;">
-                        <b>{attrs.get('Name', 'Heritage Site')}</b><br>
-                        <b>Grade:</b> {attrs.get('Grade', 'N/A')}<br>
-                        <a href="{attrs.get('hyperlink', '#')}" target="_blank">View Details</a>
-                    </div>
-                    """
-
-                    folium.Marker(
-                        location=[lat, lon],
-                        popup=folium.Popup(popup_text, max_width=200),
-                        tooltip=attrs.get('Name', 'Heritage Site'),
-                        icon=folium.Icon(
-                            color="blue", icon="info-sign", prefix="fa"),
-                    ).add_to(heritage_layer)
-
-                    sites_added += 1
-                else:
-                    logger.debug(
-                        f"Site {idx}: geometry/points structure not found")
-            except Exception as err:
-                logger.debug(f"Error processing heritage site {idx}: {err}")
-                continue
-
-        logger.info(
-            f"Added {sites_added} heritage sites to map out of {len(heritage_sites)} total")
+    # Heritage sites are now shown on-demand within planning application popups (within 100m)
 
     # ==================== CONSERVATION AREAS LAYER ====================
 
@@ -541,14 +644,14 @@ def main():
 
     if not df_filtered.empty:
         display_cols = ["uid", "address", "app_type",
-                        "app_state", "area_name", "start_date"]
+                        "app_state", "area", "start_date"]
         display_df = df_filtered[display_cols].copy()
         display_df = display_df.rename(columns={
             "uid": "UID",
             "address": "Address",
             "app_type": "Type",
             "app_state": "Status",
-            "area_name": "Area",
+            "area": "Area",
             "start_date": "Date Received"
         })
 
