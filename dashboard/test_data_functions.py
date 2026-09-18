@@ -8,7 +8,7 @@ import pandas as pd
 
 import data_functions
 from data_functions import (calculate_distance, get_sites,
-                            get_conservation_areas, load_application_data)
+                            get_conservation_areas, load_application_data, get_coords)
 
 
 def test_calculate_distance():
@@ -313,3 +313,19 @@ def test_load_application_data_handles_unexpected_error(monkeypatch):
         "⚠️ An unexpected error occurred while processing "
         "planning application data."
     )
+
+
+def test_get_coords_returns_dataframe():
+    df = pd.DataFrame({
+        "application_id": ["A001", "A002"],
+        "area_id": [1, 2],
+        "start_date": ["2025-01-01", "2025-01-02"],
+        "location_x": [0.1, 0.2],
+        "location_y": [51.5, 51.6]
+    })
+
+    result = get_coords(df)
+
+    assert isinstance(result, pd.DataFrame)
+    assert list(result["location_x"]) == [0.1, 0.2]
+    assert list(result["location_y"]) == [51.5, 51.6]
