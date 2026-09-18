@@ -4,8 +4,8 @@ Test suite for AI summary functions.
 from unittest.mock import MagicMock, patch
 import pytest
 from botocore.exceptions import ClientError
-from ai_summary_functions import (create_boto3_session, load_document, load_data,
-                                  create_openai_client, summarise_document)
+from ai_summary_functions import (create_boto3_session, load_documents, find_document_by_uid,
+                                  load_data_by_uid, create_openai_client, summarise_document)
 
 
 @patch("os.getenv")
@@ -17,19 +17,21 @@ def test_create_boto3_session(mock_getenv):
 
 
 @patch("ai_summary_functions.boto3.Session")
-def test_load_document_invalid_bucket_name(mock_session):
+def test_load_documents_invalid_bucket_name(mock_session):
     """Test that load_document returns None when the bucket does not exist."""
     # Mock the S3 client to raise NoSuchBucket exception
     mock_s3_client = mock_session.return_value.client.return_value
-    mock_s3_client.list_objects.side_effect = mock_s3_client.exceptions.NoSuchBucket({
-    }, "")
 
-    result = load_document(mock_session.return_value, "sample_uid")
-    assert result is None
+    error_response = {
+        'Error': {'Code': 'ResourceNotFoundException', 'Message': 'Table not found'}}
+    mock_s3_client.get_paginator.side_effect = ClientError(
+        error_response, 'GetItem')
+    result = load_documents(mock_session.return_value)
+    assert result == {}
 
 
 @patch("ai_summary_functions.boto3.Session")
-def test_load_document_uid_not_found(mock_session):
+def test_find_document_uid_not_found(mock_session):
     """Test that load_document returns None when UID is not found in S3."""
     # Mock the S3 client
     mock_s3_client = mock_session.return_value.client.return_value
@@ -43,30 +45,31 @@ def test_load_document_uid_not_found(mock_session):
     }
 
     # Call the function with a UID that won't match
-    result = load_document(mock_session.return_value, "non_existent_uid")
+    result = find_document_by_uid(mock_session.return_value, {
+                                  "Contents": []}, "non_existent_uid")
 
     # Assert that None is returned
     assert result is None
 
 
 @patch("ai_summary_functions.boto3.Session")
-def test_load_document_uid_found(mock_session):
+def test_find_document_uid_found(mock_session):
     """Test that load_document returns PDF content when UID is found."""
     mock_s3_client = mock_session.return_value.client.return_value
 
+    documents = {"Contents": [
+        {"Key": "documents/Greenwich_26_2646_SD/Greenwich_26_2646_SD.pdf"}
+    ]}
     # Mock list_objects to return a matching file
-    mock_s3_client.list_objects.return_value = {
-        "Contents": [
-            {"Key": "documents/Greenwich_26_2646_SD.pdf"}
-        ]
-    }
+    mock_s3_client.list_objects.return_value = documents
 
     # Mock the get_object response
     mock_s3_client.get_object.return_value = {
         "Body": MagicMock(read=MagicMock(return_value=b"PDF content here"))
     }
 
-    result = load_document(mock_session.return_value, "Greenwich_26_2646_SD")
+    result = find_document_by_uid(mock_session.return_value, documents,
+                                  "Greenwich_26_2646_SD")
 
     assert result == b"PDF content here"
 
@@ -81,7 +84,7 @@ def test_load_data_invalid_table_name(mock_session):
     mock_dynamodb_client.get_item.side_effect = ClientError(
         error_response, 'GetItem')
 
-    result = load_data(mock_session.return_value, "sample_uid")
+    result = load_data_by_uid(mock_session.return_value, "sample_uid")
     assert result == {}
 
 
