@@ -110,7 +110,6 @@ def load_application_data(_session: boto3.Session) -> pd.DataFrame:
         df["start_date"] = pd.to_datetime(
             df["start_date"],
             errors="coerce")
-
         return df
 
     except (ClientError, BotoCoreError) as aws_err:

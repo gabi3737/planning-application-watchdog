@@ -66,6 +66,8 @@ def add_sites_to_map(m: folium.Map, sites: list) -> folium.Map:
 def add_areas_to_map(m: folium.Map, areas: list) -> folium.Map:
     """Adds conservation areas to the map."""
     for area in areas:
+        if "no data" in area['properties']['NAME'].lower():
+            continue
         folium.Polygon(
             locations=[[point[1], point[0]]
                        for point in area["geometry"]["coordinates"][0]],
