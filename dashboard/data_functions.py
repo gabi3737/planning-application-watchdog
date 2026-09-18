@@ -1,5 +1,6 @@
 """Functions to load AWS data for dashboard."""
 
+import math
 import os
 import logging
 import pandas as pd
@@ -7,6 +8,8 @@ import streamlit as st
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 from dotenv import load_dotenv
+from curl_cffi import requests
+from requests.exceptions import HTTPError
 
 load_dotenv()
 
@@ -29,6 +32,48 @@ def create_boto3_session() -> boto3.Session:
         aws_secret_access_key=os.getenv("SECRET_ACCESS_KEY"),
         region_name=os.getenv("AWS_REGION", "eu-west-2")
     )
+
+
+@st.cache_data
+def get_sites(latitude: float, longitude: float, radius: int) -> list:
+    """Fetches heritage sites within the specified radius of the given latitude and longitude."""
+    base_url = "https://services-eu1.arcgis.com/ZOdPfBS3aqqDYPUQ/arcgis/rest/services/National_Heritage_List_for_England_NHLE_v02_VIEW/FeatureServer/0/"
+    query = f"query?f=json&geometry={longitude},{latitude}&geometryType=esriGeometryPoint&where=1%3D1&outSR=4326&inSR=4326&distance={radius}&outFields=Name,Grade,Hyperlink&returnGeometry=true"
+    url = base_url + query
+    try:
+        heritage_sites_data = requests.get(
+            impersonate="chrome124", url=url).json()
+    except HTTPError as err:
+        logger.error(f"HTTP Error fetching heritage sites: {err}")
+        return []
+    if "features" not in heritage_sites_data:
+        logger.error("Invalid data format received for heritage sites.")
+        return []
+    if len(heritage_sites_data["features"]) == 0:
+        logger.info("No heritage sites found within the specified radius")
+        return []
+    return heritage_sites_data["features"]
+
+
+@st.cache_data
+def get_conservation_areas(latitude: float, longitude: float, radius: int) -> list:
+    """Fetches conservation areas within the specified radius of the given latitude and longitude."""
+    base_url = "https://services-eu1.arcgis.com/ZOdPfBS3aqqDYPUQ/arcgis/rest/services/Conservation_Areas/FeatureServer/0/"
+    query = f"query?f=geojson&geometry={longitude},{latitude}&geometryType=esriGeometryPoint&inSR=4326&outSR=4326&distance={radius}&where=1%3D1&outFields=NAME&returnGeometry=true"
+    url = base_url + query
+    try:
+        conservation_areas_data = requests.get(
+            impersonate="chrome124", url=url).json()
+    except HTTPError as err:
+        logger.error(f"HTTP Error fetching conservation areas: {err}")
+        return []
+    if "features" not in conservation_areas_data:
+        logger.error("Invalid data format received for conservation areas.")
+        return []
+    if len(conservation_areas_data["features"]) == 0:
+        logger.info("No conservation areas found within the specified radius")
+        return []
+    return conservation_areas_data["features"]
 
 
 @st.cache_data
@@ -108,3 +153,17 @@ def load_application_documents(s3_client: boto3.client, bucket_name: str, uid: s
 def load_csv_data() -> pd.DataFrame:
     # Postcode column for CSV data remains invalid
     ...
+
+
+def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Calculates the distance in meters between two coordinates using the Haversine formula."""
+    R = 6371000  # Earth's radius in meters
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    diff_phi = math.radians(lat2 - lat1)
+    diff_long = math.radians(lon2 - lon1)
+
+    a = math.sin(diff_phi/2)**2 + math.cos(phi1) * \
+        math.cos(phi2) * math.sin(diff_long/2)**2
+    c = 2 * math.asin(math.sqrt(a))
+    return R * c
