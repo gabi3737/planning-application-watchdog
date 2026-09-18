@@ -78,6 +78,6 @@ resource "aws_lambda_function" "notification_lambda" {
   package_type  = "Image"
   image_uri     = "${aws_ecr_repository.notification_image_repo.repository_url}:latest"
 
-  memory_size = 128
+  memory_size = 256
   timeout     = 60
 }
