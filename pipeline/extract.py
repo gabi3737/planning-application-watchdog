@@ -316,7 +316,7 @@ def fetch_applications(auth_code: int, start_date: str, end_date: str) -> List[D
             page += 1
 
             # Add delay between requests to avoid rate limiting
-            time.sleep(60)
+            time.sleep(20)
 
         except Exception as e:
             logger.error(f"Auth {auth_code}: Error fetching page {page}: {e}")
