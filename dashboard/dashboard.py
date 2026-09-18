@@ -131,7 +131,6 @@ def render_page() -> None:
         st.markdown(
             """
             <style>
-            /* Downscaling a large source image with a lower-quality algorithm causes blur; force high-quality resampling */
             [data-testid="stImage"] img {
                 image-rendering: -webkit-optimize-contrast;
                 image-rendering: high-quality;
