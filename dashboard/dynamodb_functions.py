@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 # Initialize DynamoDB resource
 dynamodb = boto3.resource(
-    'dynamodb', region_name=os.getenv('AWS_REGION', 'eu-west-1'))
+    'dynamodb', region_name=os.getenv('AWS_REGION', 'eu-west-2'))
 
 
 def subscribe_user(area: str, email: str) -> dict:
