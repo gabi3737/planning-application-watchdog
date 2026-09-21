@@ -138,6 +138,37 @@ def get_pdf(url: str, session: requests.Session) -> Optional[bytes]:
         return None
 
 
+def pdf_exists_in_s3(uid: str) -> bool:
+    """Check if a PDF already exists in S3 for the given UID.
+
+    Returns True if any file exists in the UID's folder, False otherwise.
+    Only checks S3 (returns False if USE_S3 is False).
+    """
+    if not USE_S3:
+        return False
+
+    try:
+        s3_client = get_s3_client()
+        safe_uid = uid.replace("/", "_")
+        s3_prefix = f"{S3_DOCUMENTS_PREFIX}/{safe_uid}/"
+
+        # List objects with the given prefix
+        response = s3_client.list_objects_v2(
+            Bucket=S3_BUCKET,
+            Prefix=s3_prefix,
+            MaxKeys=1  # Only need to know if at least one file exists
+        )
+
+        # Check if any objects were returned
+        return response.get("Contents") is not None and len(response.get("Contents", [])) > 0
+    except ClientError as e:
+        logger.warning(f"Error checking S3 for {uid}: {e}")
+        return False
+    except Exception as e:
+        logger.warning(f"Unexpected error checking S3 for {uid}: {e}")
+        return False
+
+
 def upload_pdf_to_s3_or_local(content: bytes, uid: str, filename: str) -> bool:
     """Upload PDF to S3, or save locally if USE_S3is False. Returns True if successful."""
     if not USE_S3:
@@ -178,15 +209,27 @@ def upload_pdf_to_s3_or_local(content: bytes, uid: str, filename: str) -> bool:
         return False
 
 
-def download_documents(app_url: str, session: requests.Session, uid: str) -> bool:
+def download_documents(app_url: str, session: requests.Session, uid: str, force_pdf: bool = False) -> bool:
     """Download the application form PDF for a planning application.
 
     Strategy: 
-    1. Find all PDF links
-    2. Prioritize PDFs with 'form' or 'applicationform' in link text
-    3. Fall back to first PDF if no form found
-    4. Return True if successfully downloaded, False otherwise
+    1. Check if PDF already exists in S3 (skip if found, unless force_pdf=True)
+    2. Find all PDF links
+    3. Prioritize PDFs with 'form' or 'applicationform' in link text
+    4. Fall back to first PDF if no form found
+    5. Return True if successfully downloaded or skipped (already exists), False on error
+
+    Args:
+        app_url: URL to the application summary page
+        session: HTTP session for making requests
+        uid: Unique identifier for the application (e.g., "Newham/26/01919/CLP")
+        force_pdf: If True, re-download even if PDF exists in S3
     """
+    # Check if PDF already exists (skip if found and not forcing re-download)
+    if USE_S3 and not force_pdf and pdf_exists_in_s3(uid):
+        logger.info(f"    ✓ PDF already exists for {uid}, skipping extraction")
+        return True
+
     if not app_url:
         logger.debug(f"    No URL provided for {uid}")
         return False
@@ -294,7 +337,7 @@ def fetch_applications(auth_code: int, start_date: str, end_date: str) -> List[D
                 "auth": auth_code,
                 "start_date": start_date,
                 "end_date": end_date,
-                "pg_sz": 10,
+                "pg_sz": 50,
                 "page": page,
             }
 
@@ -325,7 +368,7 @@ def fetch_applications(auth_code: int, start_date: str, end_date: str) -> List[D
     return all_records
 
 
-def extract_all_areas(start_date: str = None, end_date: str = None, save_pdf: bool = False) -> Dict[str, pd.DataFrame]:
+def extract_all_areas(start_date: str = None, end_date: str = None, save_pdf: bool = False, force_pdf: bool = False) -> Dict[str, pd.DataFrame]:
     """Extract planning applications for all areas.
 
     Returns dict mapping area_name to DataFrame of extracted records.
@@ -334,6 +377,7 @@ def extract_all_areas(start_date: str = None, end_date: str = None, save_pdf: bo
         start_date: Start date (YYYY-MM-DD) or None for last 7 days
         end_date: End date (YYYY-MM-DD) or None for last 7 days
         save_pdf: If True, download and upload PDFs for each application
+        force_pdf: If True, re-download PDFs even if they already exist in S3
 
     Returns:
         {area_name: pd.DataFrame, ...}
@@ -371,13 +415,18 @@ def extract_all_areas(start_date: str = None, end_date: str = None, save_pdf: bo
                     f"  Downloading application forms for {len(extracted)} records...")
                 forms_downloaded = 0
                 forms_failed = 0
+                forms_skipped = 0
 
                 for i, record in enumerate(extracted, 1):
                     if record.get("url"):
                         logger.debug(
                             f"  [{i}/{len(extracted)}] Processing {record['uid']}")
-                        if download_documents(record["url"], session, record["uid"]):
-                            forms_downloaded += 1
+                        if download_documents(record["url"], session, record["uid"], force_pdf):
+                            # Check if file was skipped (already exists) or downloaded
+                            if USE_S3 and not force_pdf and pdf_exists_in_s3(record["uid"]):
+                                forms_skipped += 1
+                            else:
+                                forms_downloaded += 1
                         else:
                             forms_failed += 1
                         # Delay between each application's download to avoid rate limiting
@@ -387,23 +436,24 @@ def extract_all_areas(start_date: str = None, end_date: str = None, save_pdf: bo
                             f"  [{i}/{len(extracted)}] Skipping {record['uid']} (no URL)")
 
                 logger.info(
-                    f"  Application forms for {area_name}: {forms_downloaded} downloaded, {forms_failed} failed")
+                    f"  Application forms for {area_name}: {forms_downloaded} downloaded, {forms_failed} failed, {forms_skipped} skipped")
 
     return extracted_dfs
 
 
-def main(start_date: str = None, end_date: str = None, save_pdf: bool = False) -> Dict[str, pd.DataFrame]:
+def main(start_date: str = None, end_date: str = None, save_pdf: bool = False, force_pdf: bool = False) -> Dict[str, pd.DataFrame]:
     """Extract planning applications for all areas.
 
     Args:
         start_date: Start date (YYYY-MM-DD) or None for last 7 days
         end_date: End date (YYYY-MM-DD) or None for last 7 days
         save_pdf: If True, download PDFs for each application
+        force_pdf: If True, re-download PDFs even if they already exist in S3
 
     Returns:
         Dict[area_name, DataFrame] with extracted records
     """
-    return extract_all_areas(start_date, end_date, save_pdf)
+    return extract_all_areas(start_date, end_date, save_pdf, force_pdf)
 
 
 if __name__ == "__main__":
@@ -413,6 +463,8 @@ if __name__ == "__main__":
     parser.add_argument("--end-date", help="End date (YYYY-MM-DD)")
     parser.add_argument("--save-pdf", action="store_true",
                         help="Download PDFs for each application")
+    parser.add_argument("--force-pdf", action="store_true",
+                        help="Re-download PDFs even if they already exist in S3")
     parser.add_argument("--local", action="store_true",
                         help="Save PDFs locally instead of uploading to S3")
     parser.add_argument("--save-csv", action="store_true",
@@ -423,7 +475,7 @@ if __name__ == "__main__":
         USE_S3 = False
         logger.info("LOCAL mode: PDFs will be saved to local disk")
 
-    dfs = main(args.start_date, args.end_date, args.save_pdf)
+    dfs = main(args.start_date, args.end_date, args.save_pdf, args.force_pdf)
     logger.info(f"Extraction complete. Extracted {len(dfs)} area datasets:"
                 f" {', '.join(dfs.keys())}")
 
