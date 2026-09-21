@@ -421,9 +421,12 @@ def extract_all_areas(start_date: str = None, end_date: str = None, save_pdf: bo
                     if record.get("url"):
                         logger.debug(
                             f"  [{i}/{len(extracted)}] Processing {record['uid']}")
+                        # Check if file existed BEFORE attempting download
+                        was_already_present = USE_S3 and not force_pdf and pdf_exists_in_s3(
+                            record["uid"])
                         if download_documents(record["url"], session, record["uid"], force_pdf):
-                            # Check if file was skipped (already exists) or downloaded
-                            if USE_S3 and not force_pdf and pdf_exists_in_s3(record["uid"]):
+                            # Distinguish between skipped and downloaded based on pre-check
+                            if was_already_present:
                                 forms_skipped += 1
                             else:
                                 forms_downloaded += 1
