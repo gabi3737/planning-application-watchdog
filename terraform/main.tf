@@ -5,12 +5,6 @@ terraform {
       version = "~> 5.0"
     }
   }
-  cloud {
-    organization = "planning-watchdog"
-    workspaces {
-      name = "c25-planning-watchdog"
-    }
-  }
 }
 
 provider "aws" {
@@ -20,16 +14,16 @@ provider "aws" {
 }
 
 data "aws_vpc" "vpc" {
-    id = var.vpc_id
+  id = var.vpc_id
 }
 
 data "aws_ecs_cluster" "ecs_cluster" {
-    cluster_name = var.ecs_cluster_name
+  cluster_name = var.ecs_cluster_name
 }
 
 data "aws_subnets" "public_subnets" {
-    filter {
-      name   = "vpc-id"
-      values = [data.aws_vpc.vpc.id]
-    }
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.vpc.id]
+  }
 }
