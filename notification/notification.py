@@ -47,6 +47,10 @@ def load_user_data(session: boto3.Session) -> pd.DataFrame:
         table = dynamodb.Table(user_data)
         response = table.scan()
         data = response.get("Items", [])
+        while "LastEvaluatedKey" in response:
+            response = table.scan(
+                ExclusiveStartKey=response["LastEvaluatedKey"])
+            data.extend(response.get("Items", []))
         dataframe = pd.DataFrame(data)
         logging.info(f"Loaded {len(dataframe)} records from DynamoDB.")
 
