@@ -121,8 +121,6 @@ def get_yesterday_data(planning_data_df: pd.DataFrame) -> pd.DataFrame:
     if yesterday_data_df.empty:
         logging.warning("No planning data found for yesterday.")
 
-    print(yesterday_data_df.columns)
-
     return yesterday_data_df
 
 
