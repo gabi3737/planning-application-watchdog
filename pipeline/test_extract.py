@@ -284,19 +284,20 @@ class TestDownloadDocuments:
     """Test document download orchestration."""
 
     def test_returns_false_when_no_url(self):
-        assert download_documents(None, Mock(), "uid") is False
+        assert download_documents(
+            None, Mock(), "uid", force_pdf=False) is False
 
     def test_returns_false_when_webpage_fails_to_load(self):
         with patch("extract.load_webpage", return_value=None):
             result = download_documents(
-                "https://example.com", Mock(), "uid")
+                "https://example.com", Mock(), "uid", force_pdf=False)
         assert result is False
 
     def test_returns_false_when_no_pdfs_found(self):
         soup = BeautifulSoup("<html></html>", "html.parser")
         with patch("extract.load_webpage", return_value=soup):
             result = download_documents(
-                "https://example.com", Mock(), "uid")
+                "https://example.com", Mock(), "uid", force_pdf=False)
         assert result is False
 
     def test_downloads_form_pdf_when_found(self):
@@ -308,7 +309,7 @@ class TestDownloadDocuments:
                 patch("extract.get_pdf", return_value=b"content"), \
                 patch("extract.upload_pdf_to_s3_or_local", return_value=True):
             result = download_documents(
-                "https://example.com", Mock(), "uid")
+                "https://example.com", Mock(), "uid", force_pdf=False)
         assert result is True
 
     def test_returns_false_when_pdf_download_fails(self):
@@ -318,7 +319,7 @@ class TestDownloadDocuments:
                 patch("extract.find_pdf_urls", return_value=pdf_links), \
                 patch("extract.get_pdf", return_value=None):
             result = download_documents(
-                "https://example.com", Mock(), "uid")
+                "https://example.com", Mock(), "uid", force_pdf=False)
         assert result is False
 
     def test_returns_false_when_upload_fails(self):
@@ -329,7 +330,7 @@ class TestDownloadDocuments:
                 patch("extract.get_pdf", return_value=b"content"), \
                 patch("extract.upload_pdf_to_s3_or_local", return_value=False):
             result = download_documents(
-                "https://example.com", Mock(), "uid")
+                "https://example.com", Mock(), "uid", force_pdf=False)
         assert result is False
 
 
@@ -363,7 +364,7 @@ class TestExtractAllAreas:
                 patch("extract.create_session", return_value=Mock()), \
                 patch("extract.download_documents", return_value=True) as mock_download:
             result = extract_all_areas(
-                "2026-09-01", "2026-09-15", save_pdf=True)
+                "2026-09-01", "2026-09-15", save_pdf=True, force_pdf=False)
 
         assert len(result) == 3
         assert mock_download.called
@@ -374,10 +375,11 @@ class TestMain:
 
     def test_main_delegates_to_extract_all_areas(self):
         with patch("extract.extract_all_areas", return_value={"area_318": pd.DataFrame()}) as mock_extract:
-            result = main("2026-09-01", "2026-09-15", save_pdf=True)
+            result = main("2026-09-01", "2026-09-15",
+                          save_pdf=True, force_pdf=False)
 
         mock_extract.assert_called_once_with(
-            "2026-09-01", "2026-09-15", True)
+            "2026-09-01", "2026-09-15", True, False)
         assert "area_318" in result
 
 
