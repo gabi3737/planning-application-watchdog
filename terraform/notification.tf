@@ -65,6 +65,15 @@ resource "aws_iam_role_policy" "notification_lambda_policy" {
         ]
 
         Resource = aws_dynamodb_table.c25_planning_user_db.arn
+      },
+      {
+        Effect = "Allow"
+
+        Action = [
+          "ses:SendEmail"
+        ]
+
+        Resource = "*"
       }
     ]
   })
