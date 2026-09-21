@@ -246,3 +246,48 @@ def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
         math.cos(phi2) * math.sin(diff_long/2)**2
     c = 2 * math.asin(math.sqrt(a))
     return R * c
+
+
+def get_postcode_coordinates(postcode: str) -> dict:
+    """
+    Convert a UK postcode to latitude and longitude coordinates.
+    
+    Uses the free postcodes.io API (no authentication required).
+    
+    Args:
+        postcode: UK postcode (e.g., 'E1 6AN')
+        
+    Returns:
+        Dictionary with keys 'latitude', 'longitude', and 'postcode' if successful,
+        or {'error': error_message} if the postcode is invalid or API call fails
+    """
+    if not postcode or not isinstance(postcode, str):
+        return {'error': 'Invalid postcode provided'}
+    
+    try:
+        # Clean and format the postcode
+        postcode_clean = postcode.strip().upper()
+        
+        # Call the postcodes.io API
+        url = f"https://api.postcodes.io/postcodes/{postcode_clean}"
+        response = requests.get(url)
+        
+        data = response.json()
+        
+        # Check if the request was successful (postcodes.io returns 200 for valid, 404 for invalid)
+        if response.status_code == 200 and data.get('status') == 200 and 'result' in data:
+            result = data['result']
+            return {
+                'latitude': result['latitude'],
+                'longitude': result['longitude'],
+                'postcode': result['postcode'],
+                'success': True
+            }
+        elif response.status_code == 404 or data.get('status') == 404:
+            return {'error': f"Postcode '{postcode}' not found"}
+        else:
+            return {'error': f"Unable to process postcode '{postcode}'"}
+            
+    except Exception as err:
+        logger.error(f"Error converting postcode to coordinates: {err}")
+        return {'error': 'An error occurred while processing your postcode'}
