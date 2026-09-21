@@ -7,3 +7,4 @@ omit =
     pipeline/test_transform.py
     pipeline/test_save_documents.py
     pipeline/conftest.py
+    notification/test_notification.py
