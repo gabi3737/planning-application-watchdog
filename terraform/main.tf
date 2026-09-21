@@ -5,6 +5,12 @@ terraform {
       version = "~> 5.0"
     }
   }
+  cloud {
+    organization = "planning-watchdog"
+    workspaces {
+      name = "c25-planning-watchdog"
+    }
+  }
 }
 
 provider "aws" {
