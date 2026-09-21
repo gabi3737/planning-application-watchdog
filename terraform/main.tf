@@ -5,11 +5,11 @@ terraform {
       version = "~> 5.0"
     }
   }
-  cloud {
-    organization = "planning-watchdog"
-    workspaces {
-      name = "c25-planning-watchdog"
-    }
+  backend "s3" {
+    bucket = "c25-planning-terraform-config"
+    key    = "state"
+    region = var.aws_region
+    encrypt = true
   }
 }
 
