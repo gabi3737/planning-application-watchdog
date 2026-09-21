@@ -30,3 +30,9 @@ variable "subnet_group_name" {
   description = "Subnet group name"
   default = "c25-public-subnet"
 }
+
+variable "account_id" {
+  type        = string
+  description = "AWS account ID"
+  default = "129033205317"
+}

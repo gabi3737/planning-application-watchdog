@@ -177,7 +177,7 @@ data "aws_iam_policy_document" "schedule_etl_permissions_policy_doc" {
       "logs:CreateLogStream",
       "logs:PutLogEvents",
     ]
-    resources = ["arn:aws:logs:eu-west-2:129033205317:*"]
+    resources = ["arn:aws:logs:eu-west-2:${var.account_id}:*"]
   }
 
   statement {
