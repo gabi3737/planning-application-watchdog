@@ -204,34 +204,34 @@ def filter_applications(df, selected_areas, selected_types, selected_statuses, d
 def filter_applications_by_postcode(df, postcode: str, radius_km: float = 5):
     """
     Filter applications by proximity to a postcode.
-    
+
     Args:
         df: DataFrame of planning applications
         postcode: UK postcode to search near
         radius_km: Search radius in kilometers (default 5km)
-        
+
     Returns:
         Tuple of (filtered_df, postcode_coords) where postcode_coords is a dict with 'latitude', 'longitude', 'postcode'
         If postcode is invalid, returns (empty DataFrame, error dict)
     """
     if not postcode or not isinstance(postcode, str):
         return df.copy(), {}
-    
+
     # Get coordinates from postcode
     postcode_data = get_postcode_coordinates(postcode)
-    
+
     if 'error' in postcode_data:
         logger.warning(f"Postcode error: {postcode_data['error']}")
         return pd.DataFrame(), postcode_data
-    
+
     # Extract coordinates
     postcode_lat = postcode_data['latitude']
     postcode_lon = postcode_data['longitude']
-    
+
     # Filter applications within radius
     radius_meters = radius_km * 1000
     nearby_apps = []
-    
+
     for idx, row in df.iterrows():
         try:
             if pd.notna(row.get("location_y")) and pd.notna(row.get("location_x")):
@@ -244,10 +244,11 @@ def filter_applications_by_postcode(df, postcode: str, radius_km: float = 5):
         except (TypeError, ValueError) as err:
             logger.debug(f"Error calculating distance for row: {err}")
             continue
-    
+
     filtered_df = df.loc[nearby_apps] if nearby_apps else pd.DataFrame()
-    logger.info(f"Found {len(filtered_df)} applications within {radius_km}km of postcode {postcode}")
-    
+    logger.info(
+        f"Found {len(filtered_df)} applications within {radius_km}km of postcode {postcode}")
+
     return filtered_df, postcode_data
 
 
@@ -289,7 +290,7 @@ def setup_sidebar_filters(df):
         placeholder="e.g., E1 6AN",
         help="Search for planning applications near a postcode"
     )
-    
+
     postcode_radius_m = st.sidebar.slider(
         "Search radius (meters)",
         min_value=50,
@@ -438,7 +439,8 @@ def build_folium_map(df, heritage_sites, conservation_areas, filters, documents,
         # Use postcode coordinates as center
         center_lat = postcode_coords['latitude']
         center_lon = postcode_coords['longitude']
-        logger.info(f"Map centered on postcode {postcode_coords.get('postcode', 'Unknown')}")
+        logger.info(
+            f"Map centered on postcode {postcode_coords.get('postcode', 'Unknown')}")
     else:
         # Newham default center
         newham_lat = 51.54
@@ -481,7 +483,7 @@ def build_folium_map(df, heritage_sites, conservation_areas, filters, documents,
         name="Nearby Heritage Sites (within 100m)", show=True).add_to(m)
 
     # ==================== POSTCODE SEARCH MARKER ====================
-    
+
     if postcode_coords and 'latitude' in postcode_coords and 'longitude' in postcode_coords:
         postcode_popup = f"""
         <div style="font-family: Arial; font-size: 12px; width: 200px;">
@@ -491,9 +493,10 @@ def build_folium_map(df, heritage_sites, conservation_areas, filters, documents,
             <b>Longitude:</b> {postcode_coords.get('longitude', 'N/A'):.6f}
         </div>
         """
-        
+
         folium.Marker(
-            location=[postcode_coords['latitude'], postcode_coords['longitude']],
+            location=[postcode_coords['latitude'],
+                      postcode_coords['longitude']],
             popup=folium.Popup(postcode_popup, max_width=250),
             tooltip="Postcode Search Center",
             icon=folium.Icon(color="red", icon="location-dot", prefix="fa"),
@@ -752,16 +755,18 @@ def main():
     if filters.get("postcode"):
         with st.spinner(f"🔍 Searching for applications near postcode {filters['postcode']}..."):
             df_postcode_filtered, postcode_coords = filter_applications_by_postcode(
-                df_filtered, filters["postcode"], radius_km=filters.get("postcode_radius_m", 500) / 1000
+                df_filtered, filters["postcode"], radius_km=filters.get(
+                    "postcode_radius_m", 500) / 1000
             )
-        
+
         if 'error' in postcode_coords:
             st.sidebar.error(f"❌ {postcode_coords['error']}")
             df_filtered = df_filtered  # Keep original filtered data
             postcode_coords = None
         else:
             df_filtered = df_postcode_filtered
-            st.sidebar.success(f"✅ Postcode {postcode_coords.get('postcode')} found! Showing {len(df_filtered)} nearby applications within {filters.get('postcode_radius_m', 500)}m")
+            st.sidebar.success(
+                f"✅ Postcode {postcode_coords.get('postcode')} found! Showing {len(df_filtered)} nearby applications within {filters.get('postcode_radius_m', 500)}m")
 
     # Display metrics
     display_metrics(df_filtered)
