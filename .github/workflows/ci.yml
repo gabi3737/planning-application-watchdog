@@ -48,12 +48,29 @@ jobs:
                   --fail-under=6 \
                   dashboard/
             
+            - name: Lint notification
+              run: |
+                pylint \
+                  --recursive=y \
+                  --fail-under=6 \
+                  notification/
             # - name: Lint terraform lambda
             #   run: |
             #     pylint \
             #       --recursive=y \
             #       --fail-under=6 \
             #       terraform/lambda/
+
+            - name: Test notification
+              run: |
+                pytest \
+                  --cov=notification/ \
+                  --cov-report=term-missing \
+                  --cov-report=xml \
+                  --cov-fail-under=60 \
+                  -v \
+                  notification/
+
 
             - name: Test dashboard
               run: |
@@ -74,6 +91,7 @@ jobs:
                   --cov-fail-under=60 \
                   -v \
                   pipeline/
+        
 
             # - name: Install terraform lambda dependencies
             #   run: |
