@@ -72,6 +72,7 @@ Fetches planning applications from PlanIt API for areas 304, 318, 323.
 - `--start-date YYYY-MM-DD` — Start date (default: 7 days ago)
 - `--end-date YYYY-MM-DD` — End date (default: today)
 - `--save-pdf` — Download and upload PDFs (default: skip PDFs)
+- `--force-pdf` — Re-download PDFs even if they already exist in S3 (requires `--save-pdf`)
 - `--local` — Save PDFs locally instead of S3 (for testing)
 
 **Examples:**
@@ -83,12 +84,15 @@ python3 extract.py
 # Custom date range with PDFs to S3
 python3 extract.py --start-date 2024-01-01 --end-date 2024-01-31 --save-pdf
 
+# Re-download all PDFs (including those already in S3)
+python3 extract.py --save-pdf --force-pdf
+
 # Local testing mode (PDFs saved to documents/ folder)
 python3 extract.py --local --save-pdf --start-date 2024-01-01
 
 # Python usage
 from extract import extract_all_areas
-dfs = extract_all_areas(start_date="2024-01-01", end_date="2024-01-31", save_pdf=True)
+dfs = extract_all_areas(start_date="2024-01-01", end_date="2024-01-31", save_pdf=True, force_pdf=False)
 ```
 
 **Output:**
