@@ -130,22 +130,23 @@ def csv_row_to_dynamodb_item(row: pd.Series) -> Tuple[Dict[str, Any], Dict[str, 
 def has_data_changed(existing_item: Dict[str, Any], current_row: Dict[str, Any], uid: str) -> Tuple[bool, List[str]]:
     """
     Check if application status (app_state) has changed.
-    
+
     Only regenerates summaries when the decision status changes, since that's the 
     most significant change to a planning application (e.g., Undecided → Permitted).
-    
+
     Returns:
         (has_changed: bool, changed_fields: List[str])
     """
     current_app_state = str(current_row.get("app_state", ""))
     existing_app_state = str(existing_item.get("app_state", ""))
-    
+
     has_changed = current_app_state != existing_app_state
     changed_fields = []
-    
+
     if has_changed:
-        changed_fields.append(f"app_state: '{existing_app_state}' → '{current_app_state}'")
-    
+        changed_fields.append(
+            f"app_state: '{existing_app_state}' → '{current_app_state}'")
+
     return has_changed, changed_fields
 
 
@@ -177,7 +178,8 @@ def load_dataframe(table, df: pd.DataFrame, area_name: str, no_db: bool = False)
         if get_openai_client is not None:
             openai_client = get_openai_client()
     except Exception as e:
-        logger.warning(f"Could not initialize AWS/OpenAI clients for summary generation: {e}")
+        logger.warning(
+            f"Could not initialize AWS/OpenAI clients for summary generation: {e}")
         session = None
         openai_client = None
 
@@ -198,52 +200,59 @@ def load_dataframe(table, df: pd.DataFrame, area_name: str, no_db: bool = False)
 
         try:
             uid = keys.get(SORT_KEY, "unknown")
-            
+
             if not no_db:
                 # Check if record already exists
                 existing = table.get_item(Key=keys)
                 is_update = "Item" in existing
                 existing_item = existing.get("Item", {})
-                
+
                 if is_update:
                     # Existing record - check if data has changed
-                    has_changed, changed_fields = has_data_changed(existing_item, row.to_dict(), uid)
-                    
+                    has_changed, changed_fields = has_data_changed(
+                        existing_item, row.to_dict(), uid)
+
                     if not has_changed:
                         # No data changes - reuse existing summary
                         existing_summary = existing_item.get("summary", "")
                         if existing_summary:
                             attributes["summary"] = existing_summary
                             summary_reused_count += 1
-                            logger.info(f"  ✓ {uid} (no changes, reusing existing summary)")
+                            logger.info(
+                                f"  ✓ {uid} (no changes, reusing existing summary)")
                         else:
                             # No previous summary, keep current value
-                            logger.info(f"  ✓ {uid} (no changes, no previous summary)")
+                            logger.info(
+                                f"  ✓ {uid} (no changes, no previous summary)")
                     else:
                         # Data has changed - generate new summary if we have clients
                         logger.info(f"  ✓ {uid} (changes detected)")
                         for change in changed_fields:
                             logger.info(f"      • {change}")
-                        
+
                         if session and openai_client and "summary" in attributes:
                             logger.info(f"      Generating new summary...")
-                            new_summary = generate_record_summary(session, openai_client, row)
+                            new_summary = generate_record_summary(
+                                session, openai_client, row)
                             if new_summary:
                                 attributes["summary"] = new_summary
                                 summary_generated_count += 1
-                            logger.info(f"      Summary: {new_summary[:80]}...")
+                            logger.info(
+                                f"      Summary: {new_summary[:80]}...")
                 else:
                     # New record - generate summary if we have clients
                     if session and openai_client and "summary" in attributes:
                         logger.info(f"  ✓ {uid} (new record)")
                         logger.info(f"      Generating summary...")
-                        new_summary = generate_record_summary(session, openai_client, row)
+                        new_summary = generate_record_summary(
+                            session, openai_client, row)
                         if new_summary:
                             attributes["summary"] = new_summary
                             summary_generated_count += 1
                         logger.info(f"      Summary: {new_summary[:80]}...")
                     else:
-                        logger.info(f"  ✓ {uid} (new record, no summary generation)")
+                        logger.info(
+                            f"  ✓ {uid} (new record, no summary generation)")
 
                 # Build update expression to set all attributes
                 update_parts = []
@@ -541,7 +550,8 @@ def run_full_pipeline(start_date: str = None, end_date: str = None, no_db: bool 
     # Set SKIP_SUMMARY flag in transform module if requested
     if skip_summary and transform_module:
         transform_module.SKIP_SUMMARY = True
-        logger.info("Running with SKIP_SUMMARY=True - AI summaries will be skipped")
+        logger.info(
+            "Running with SKIP_SUMMARY=True - AI summaries will be skipped")
 
     try:
         # Stage 1: Extract from API → DataFrame dict

@@ -316,7 +316,8 @@ def transform_dataframe(df: pd.DataFrame, area_name: str) -> Tuple[pd.DataFrame,
 
     # Standardize nulls
     df = standardize_nulls(df)
-    df = df.reset_index(drop=True)  # Ensure sequential index for safe column assignment
+    # Ensure sequential index for safe column assignment
+    df = df.reset_index(drop=True)
 
     # Initialize summary column with empty strings (will be populated later)
     if "summary" not in df.columns:
@@ -537,7 +538,8 @@ def generate_summaries_for_dataframe(df: pd.DataFrame) -> Tuple[pd.DataFrame, in
 
             summary = generate_record_summary(session, openai_client, row)
             summaries_dict[idx] = summary
-            logger.info(f"      ✅ Summary stored for index {idx}: {summary[:80]}...")
+            logger.info(
+                f"      ✅ Summary stored for index {idx}: {summary[:80]}...")
 
         except Exception as e:
             logger.error(f"Error generating summary for row {idx}: {e}")
@@ -545,12 +547,12 @@ def generate_summaries_for_dataframe(df: pd.DataFrame) -> Tuple[pd.DataFrame, in
             error_count += 1
 
     elapsed = time.time() - start_time
-    
+
     # Map summaries to dataframe using index to ensure correct alignment
     df["summary"] = df.index.map(lambda idx: summaries_dict.get(idx, ""))
     # Re-cast to string dtype to match SCHEMA and prevent silent skipping in load stage
     df["summary"] = df["summary"].astype("string")
-    
+
     # Validate summary column integrity before passing to load stage
     assert "summary" in df.columns, "Summary column missing after generation"
     assert df["summary"].dtype == "string", f"Summary dtype is {df['summary'].dtype}, expected 'string'"
@@ -559,7 +561,8 @@ def generate_summaries_for_dataframe(df: pd.DataFrame) -> Tuple[pd.DataFrame, in
 
     logger.info(
         f"Summary generation complete: {len(df)} records in {elapsed:.1f}s ({error_count} errors)")
-    logger.info(f"✓ Summary column validated: {len(df)} rows, all non-null, dtype=string")
+    logger.info(
+        f"✓ Summary column validated: {len(df)} rows, all non-null, dtype=string")
 
     return df, error_count
 
