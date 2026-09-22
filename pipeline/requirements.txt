@@ -8,4 +8,6 @@ certifi
 curl-cffi
 pylint
 boto3
+openai
+pdfplumber
 

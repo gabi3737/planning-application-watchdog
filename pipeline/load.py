@@ -26,9 +26,11 @@ from botocore.exceptions import ClientError
 try:
     from extract import extract_all_areas
     from transform import transform_dataframes
+    import transform as transform_module
 except ImportError:
     extract_all_areas = None
     transform_dataframes = None
+    transform_module = None
 
 # Configuration
 DATA_DIR = Path(__file__).parent / "data"
@@ -117,6 +119,37 @@ def csv_row_to_dynamodb_item(row: pd.Series) -> Tuple[Dict[str, Any], Dict[str, 
     return keys, attributes
 
 
+def has_data_changed(existing_item: Dict[str, Any], current_row: Dict[str, Any], uid: str) -> Tuple[bool, List[str]]:
+    """
+    Compare existing DynamoDB item with current row to detect changes.
+    
+    Ignores summary and certain metadata fields that change frequently.
+    
+    Returns:
+        (has_changed: bool, changed_fields: List[str])
+    """
+    # Fields to ignore when checking for changes
+    IGNORE_FIELDS = {"summary", "updated_at", "created_at", "timestamp"}
+    
+    changed_fields = []
+    
+    # Check all fields in current row
+    for field, current_value in current_row.items():
+        if field in IGNORE_FIELDS:
+            continue
+            
+        # Handle null values in comparison
+        current_str = str(current_value) if pd.notna(current_value) else ""
+        existing_value = existing_item.get(field, "")
+        existing_str = str(existing_value) if existing_value else ""
+        
+        if current_str != existing_str:
+            changed_fields.append(f"{field}: '{existing_str[:50]}' → '{current_str[:50]}'")
+    
+    has_changed = len(changed_fields) > 0
+    return has_changed, changed_fields
+
+
 def load_dataframe(table, df: pd.DataFrame, area_name: str, no_db: bool = False) -> Tuple[int, int, int]:
     """
     Load a single DataFrame into DynamoDB.
@@ -128,6 +161,15 @@ def load_dataframe(table, df: pd.DataFrame, area_name: str, no_db: bool = False)
         return 0, 0, 0
 
     logger.info(f"Loading {len(df)} records from {area_name}")
+
+    # Defensive check: warn if summary column is missing
+    if "summary" not in df.columns:
+        logger.warning(f"⚠️ Summary column missing from {area_name} dataframe - summaries will NOT be loaded")
+    else:
+        null_count = df["summary"].isna().sum()
+        if null_count > 0:
+            logger.warning(f"⚠️ {null_count} rows in {area_name} have null summaries")
+        logger.info(f"✓ Summary column present: {len(df) - null_count} rows with summaries")
 
     created_count = 0
     updated_count = 0
@@ -143,10 +185,31 @@ def load_dataframe(table, df: pd.DataFrame, area_name: str, no_db: bool = False)
             continue
 
         try:
+            uid = keys.get(SORT_KEY, "unknown")
+            
             if not no_db:
                 # Check if record already exists
                 existing = table.get_item(Key=keys)
                 is_update = "Item" in existing
+                existing_item = existing.get("Item", {})
+                summary_reused = False
+                
+                # If updating, check if data has actually changed
+                if is_update:
+                    has_changed, changed_fields = has_data_changed(existing_item, row.to_dict(), uid)
+                    
+                    if not has_changed:
+                        # No data changes - reuse existing summary to avoid unnecessary API calls
+                        existing_summary = existing_item.get("summary", "")
+                        if existing_summary and "summary" in attributes:
+                            attributes["summary"] = existing_summary
+                            summary_reused = True
+                            logger.info(f"  ✓ {uid} (no changes, reusing existing summary)")
+                    else:
+                        # Data has changed - log what changed
+                        logger.info(f"  ✓ {uid} (changes detected, regenerating summary)")
+                        for change in changed_fields:
+                            logger.info(f"      • {change}")
 
                 # Build update expression to set all attributes
                 update_parts = []
@@ -177,12 +240,10 @@ def load_dataframe(table, df: pd.DataFrame, area_name: str, no_db: bool = False)
                     )
 
                 # Track whether it was a create or update
-                uid = keys.get(SORT_KEY, "unknown")
                 if is_update:
-                    logger.info(f"  Updating {uid}")
                     updated_count += 1
                 else:
-                    logger.info(f"  Creating {uid}")
+                    logger.info(f"  ✓ {uid} (new record)")
                     created_count += 1
         except ClientError as e:
             logger.error(f"Failed to load row {idx + 1}: {e}")
@@ -411,7 +472,7 @@ def main_from_dataframes(dfs_dict: Dict[str, pd.DataFrame], no_db: bool = False)
 
 
 def run_full_pipeline(start_date: str = None, end_date: str = None, no_db: bool = False,
-                      local: bool = False, save_pdf: bool = False) -> Tuple[int, int, int]:
+                      local: bool = False, save_pdf: bool = False, skip_summary: bool = False) -> Tuple[int, int, int]:
     """Run the complete ETL pipeline: extract → transform → load.
 
     This orchestration function calls all three pipeline stages in sequence.
@@ -422,6 +483,7 @@ def run_full_pipeline(start_date: str = None, end_date: str = None, no_db: bool 
         no_db: If True, simulate DynamoDB writes without updating
         local: If True, use local disk mode (no AWS credentials needed)
         save_pdf: If True, save/upload PDFs during extraction
+        skip_summary: If True, skip AI summary generation (useful for local testing)
 
     Returns:
         (total_created, total_updated, total_failed) - counts from DynamoDB load stage
@@ -440,6 +502,11 @@ def run_full_pipeline(start_date: str = None, end_date: str = None, no_db: bool 
         extract_module.USE_S3 = False
         logger.info("Running in LOCAL mode - PDFs will be saved to local disk")
 
+    # Set SKIP_SUMMARY flag in transform module if requested
+    if skip_summary and transform_module:
+        transform_module.SKIP_SUMMARY = True
+        logger.info("Running with SKIP_SUMMARY=True - AI summaries will be skipped")
+
     try:
         # Stage 1: Extract from API → DataFrame dict
         logger.info("\n" + "="*60)
@@ -454,7 +521,7 @@ def run_full_pipeline(start_date: str = None, end_date: str = None, no_db: bool 
         # Stage 2: Transform → Validate & Standardize
         logger.info("\n" + "="*60)
         logger.info(
-            "STAGE 2: TRANSFORMATION (Validate → Standardize → Typecast)")
+            "STAGE 2: TRANSFORMATION (Validate → Standardize → Typecast → Generate Summaries)")
         logger.info("="*60)
         transformed_dfs, reports = transform_dataframes(dfs)
         logger.info(f"✓ Transformed {len(transformed_dfs)} area datasets")
@@ -572,7 +639,8 @@ def lambda_handler(event, context):
             end_date=end_date,
             no_db=no_db,
             local=False,  # Lambda always uses AWS resources
-            save_pdf=save_pdf
+            save_pdf=save_pdf,
+            skip_summary=False  # Lambda uses full pipeline with summaries
         )
 
         execution_time = time.time() - start_time
@@ -643,6 +711,8 @@ Examples:
                         help="Download and upload PDFs during extraction. Only used with --pipeline")
     parser.add_argument("--local", action="store_true",
                         help="Run in local mode (no AWS credentials needed). Only used with --pipeline")
+    parser.add_argument("--skip-summary", action="store_true",
+                        help="Skip AI summary generation (useful for local testing without OpenAI/AWS credentials)")
     parser.add_argument("--no-db", action="store_true",
                         help="Simulate loading without writing to DynamoDB")
 
@@ -653,6 +723,7 @@ Examples:
                           end_date=args.end_date,
                           no_db=args.no_db,
                           local=args.local,
-                          save_pdf=args.save_pdf)
+                          save_pdf=args.save_pdf,
+                          skip_summary=args.skip_summary)
     else:
         main(no_db=args.no_db)
