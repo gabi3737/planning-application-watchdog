@@ -141,41 +141,41 @@ def load_application_data(_session: boto3.Session) -> pd.DataFrame:
 
 
 @st.cache_data
-def get_planning_applications_by_area(_session: boto3.Session, latitude: float, 
+def get_planning_applications_by_area(_session: boto3.Session, latitude: float,
                                       longitude: float, radius: int, area_name: str = None) -> list:
     """
     Fetch planning applications from DynamoDB and filter by area and distance.
-    
+
     Args:
         _session: boto3 session for AWS access (prefixed with _ to exclude from cache key)
         latitude: center point latitude
         longitude: center point longitude
         radius: search radius in meters
         area_name: optional area name to filter (Tower Hamlets, Newham, Greenwich)
-        
+
     Returns:
         List of applications within the radius, optionally filtered by area
     """
     try:
         # Load all applications from DynamoDB
         df = load_application_data(_session)
-        
+
         if df.empty:
             return []
-        
+
         # Filter by area if specified
         if area_name:
             df = df[df["area_name"] == area_name]
-            
+
         if df.empty:
             return []
-        
+
         # Filter by distance
         applications = []
         for _, row in df.iterrows():
             distance = calculate_distance(
-                latitude, longitude, 
-                float(row.get("location_y", 0)), 
+                latitude, longitude,
+                float(row.get("location_y", 0)),
                 float(row.get("location_x", 0))
             )
             if distance <= radius:
@@ -189,15 +189,16 @@ def get_planning_applications_by_area(_session: boto3.Session, latitude: float,
                     "url": row.get("url", "#"),
                     "area_name": row.get("area_name", "N/A")
                 })
-        
-        logger.info(f"Found {len(applications)} planning applications within {radius}m of ({latitude}, {longitude})")
+
+        logger.info(
+            f"Found {len(applications)} planning applications within {radius}m of ({latitude}, {longitude})")
         return applications
-        
+
     except Exception as err:
         logger.error(f"Error fetching planning applications: {err}")
         return []
-      
-      
+
+
 def get_coords(df: pd.DataFrame) -> pd.DataFrame:
     """Extracts coordinates from the planning application DataFrame."""
     if "location_x" in df.columns and "location_y" in df.columns:
@@ -246,3 +247,48 @@ def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
         math.cos(phi2) * math.sin(diff_long/2)**2
     c = 2 * math.asin(math.sqrt(a))
     return R * c
+
+
+def get_postcode_coordinates(postcode: str) -> dict:
+    """
+    Convert a UK postcode to latitude and longitude coordinates.
+
+    Uses the free postcodes.io API (no authentication required).
+
+    Args:
+        postcode: UK postcode (e.g., 'E1 6AN')
+
+    Returns:
+        Dictionary with keys 'latitude', 'longitude', and 'postcode' if successful,
+        or {'error': error_message} if the postcode is invalid or API call fails
+    """
+    if not postcode or not isinstance(postcode, str):
+        return {'error': 'Invalid postcode provided'}
+
+    try:
+        # Clean and format the postcode
+        postcode_clean = postcode.strip().upper()
+
+        # Call the postcodes.io API
+        url = f"https://api.postcodes.io/postcodes/{postcode_clean}"
+        response = requests.get(url)
+
+        data = response.json()
+
+        # Check if the request was successful (postcodes.io returns 200 for valid, 404 for invalid)
+        if response.status_code == 200 and data.get('status') == 200 and 'result' in data:
+            result = data['result']
+            return {
+                'latitude': result['latitude'],
+                'longitude': result['longitude'],
+                'postcode': result['postcode'],
+                'success': True
+            }
+        elif response.status_code == 404 or data.get('status') == 404:
+            return {'error': f"Postcode '{postcode}' not found"}
+        else:
+            return {'error': f"Unable to process postcode '{postcode}'"}
+
+    except Exception as err:
+        logger.error(f"Error converting postcode to coordinates: {err}")
+        return {'error': 'An error occurred while processing your postcode'}

@@ -23,6 +23,7 @@ from data_functions import (
     APP_TYPE_COLORS,
     create_boto3_session,
     calculate_distance,
+    get_postcode_coordinates,
 )
 from ai_summary_functions import load_documents, convert_info_to_dict, get_ai_summary
 from dynamodb_functions import subscribe_user
@@ -200,6 +201,57 @@ def filter_applications(df, selected_areas, selected_types, selected_statuses, d
     return filtered_df
 
 
+def filter_applications_by_postcode(df, postcode: str, radius_km: float = 5):
+    """
+    Filter applications by proximity to a postcode.
+
+    Args:
+        df: DataFrame of planning applications
+        postcode: UK postcode to search near
+        radius_km: Search radius in kilometers (default 5km)
+
+    Returns:
+        Tuple of (filtered_df, postcode_coords) where postcode_coords is a dict with 'latitude', 'longitude', 'postcode'
+        If postcode is invalid, returns (empty DataFrame, error dict)
+    """
+    if not postcode or not isinstance(postcode, str):
+        return df.copy(), {}
+
+    # Get coordinates from postcode
+    postcode_data = get_postcode_coordinates(postcode)
+
+    if 'error' in postcode_data:
+        logger.warning(f"Postcode error: {postcode_data['error']}")
+        return pd.DataFrame(), postcode_data
+
+    # Extract coordinates
+    postcode_lat = postcode_data['latitude']
+    postcode_lon = postcode_data['longitude']
+
+    # Filter applications within radius
+    radius_meters = radius_km * 1000
+    nearby_apps = []
+
+    for idx, row in df.iterrows():
+        try:
+            if pd.notna(row.get("location_y")) and pd.notna(row.get("location_x")):
+                distance = calculate_distance(
+                    postcode_lat, postcode_lon,
+                    float(row["location_y"]), float(row["location_x"])
+                )
+                if distance <= radius_meters:
+                    nearby_apps.append(idx)
+        except (TypeError, ValueError) as err:
+            logger.debug(f"Error calculating distance for row: {err}")
+            continue
+
+    filtered_df = df.loc[nearby_apps] if nearby_apps else pd.DataFrame()
+    logger.info(
+        f"Found {len(filtered_df)} applications within {radius_km}km of postcode {postcode}")
+
+    return filtered_df, postcode_data
+
+
 # ==================== METRICS SECTION ====================
 
 def display_metrics(df):
@@ -231,40 +283,63 @@ def setup_sidebar_filters(df):
     """Setup sidebar filter controls."""
     st.sidebar.header("🔍 Filters")
 
-    # Area filter
-    available_areas = sorted(
-        df["area"].unique().tolist()) if not df.empty else []
-    selected_areas = st.sidebar.multiselect(
-        "Council Area",
-        options=available_areas,
-        default=available_areas,
-        help="Filter by council area"
+    # Postcode search (at the top)
+    st.sidebar.subheader("📍 Search by Postcode")
+    postcode = st.sidebar.text_input(
+        "Enter UK postcode",
+        placeholder="e.g., E1 6AN",
+        help="Search for planning applications near a postcode"
     )
 
-    # Application type filter
-    available_types = sorted(
-        df["app_type"].unique().tolist()) if not df.empty else []
-    selected_types = st.sidebar.multiselect(
-        "Application Type",
-        options=available_types,
-        default=available_types,
-        help="Filter by planning application type"
-    )
-
-    # Application status filter
-    available_statuses = sorted(
-        df["app_state"].unique().tolist()) if not df.empty else []
-    selected_statuses = st.sidebar.multiselect(
-        "Application Status",
-        options=available_statuses,
-        default=available_statuses,
-        help="Filter by application status"
+    postcode_radius_m = st.sidebar.slider(
+        "Search radius (meters)",
+        min_value=50,
+        max_value=1000,
+        value=500,
+        step=50,
+        help="How far to search from the postcode (50m-1000m)"
     )
 
     st.sidebar.divider()
 
+    # Collapsible filters section
+    with st.sidebar.expander("🏢 Council Area", expanded=False):
+        available_areas = sorted(
+            df["area"].unique().tolist()) if not df.empty else []
+        selected_areas = st.multiselect(
+            "Council Area",
+            options=available_areas,
+            default=available_areas,
+            help="Filter by council area",
+            key="areas_filter"
+        )
+
+    with st.sidebar.expander("📋 Application Type", expanded=False):
+        available_types = sorted(
+            df["app_type"].unique().tolist()) if not df.empty else []
+        selected_types = st.multiselect(
+            "Application Type",
+            options=available_types,
+            default=available_types,
+            help="Filter by planning application type",
+            key="types_filter"
+        )
+
+    with st.sidebar.expander("✅ Application Status", expanded=False):
+        available_statuses = sorted(
+            df["app_state"].unique().tolist()) if not df.empty else []
+        selected_statuses = st.multiselect(
+            "Application Status",
+            options=available_statuses,
+            default=available_statuses,
+            help="Filter by application status",
+            key="statuses_filter"
+        )
+
+    st.sidebar.divider()
+
     # Date range filter
-    st.sidebar.subheader("Date Range")
+    st.sidebar.subheader("📅 Date Range")
 
     if not df.empty and "start_date" in df.columns:
         min_date = pd.to_datetime(df["start_date"]).min()
@@ -344,12 +419,14 @@ def setup_sidebar_filters(df):
         "search_query": search_query,
         "show_conservation_areas": show_conservation_areas,
         "show_clustering": show_clustering,
+        "postcode": postcode,
+        "postcode_radius_m": postcode_radius_m,
     }
 
 
 # ==================== FOLIUM MAP BUILDER ====================
 
-def build_folium_map(df, heritage_sites, conservation_areas, filters, documents):
+def build_folium_map(df, heritage_sites, conservation_areas, filters, documents, postcode_coords=None):
     """Build the folium map with all layers and features."""
 
     if df.empty:
@@ -357,31 +434,39 @@ def build_folium_map(df, heritage_sites, conservation_areas, filters, documents)
             "⚠️ No planning applications to display. Please adjust your filters.")
         return None
 
-    # Newham default center
-    newham_lat = 51.54
-    newham_lon = 0.02
+    # Determine map center
+    if postcode_coords and 'latitude' in postcode_coords and 'longitude' in postcode_coords:
+        # Use postcode coordinates as center
+        center_lat = postcode_coords['latitude']
+        center_lon = postcode_coords['longitude']
+        logger.info(
+            f"Map centered on postcode {postcode_coords.get('postcode', 'Unknown')}")
+    else:
+        # Newham default center
+        newham_lat = 51.54
+        newham_lon = 0.02
 
-    # Calculate map center based on all applications
-    try:
-        # Filter out invalid coordinates (NaN or extreme values)
-        valid_df = df[
-            (df["location_y"].notna()) &
-            (df["location_x"].notna()) &
-            (df["location_y"].between(51.0, 52.0)) &  # London bounds
-            (df["location_x"].between(-0.5, 0.5))     # London bounds
-        ]
+        # Calculate map center based on all applications
+        try:
+            # Filter out invalid coordinates (NaN or extreme values)
+            valid_df = df[
+                (df["location_y"].notna()) &
+                (df["location_x"].notna()) &
+                (df["location_y"].between(51.0, 52.0)) &  # London bounds
+                (df["location_x"].between(-0.5, 0.5))     # London bounds
+            ]
 
-        if not valid_df.empty:
-            center_lat = valid_df["location_y"].mean()
-            center_lon = valid_df["location_x"].mean()
-        else:
+            if not valid_df.empty:
+                center_lat = valid_df["location_y"].mean()
+                center_lon = valid_df["location_x"].mean()
+            else:
+                center_lat = newham_lat
+                center_lon = newham_lon
+        except Exception as err:
+            logger.warning(
+                f"Error calculating map center: {err}. Defaulting to Newham.")
             center_lat = newham_lat
             center_lon = newham_lon
-    except Exception as err:
-        logger.warning(
-            f"Error calculating map center: {err}. Defaulting to Newham.")
-        center_lat = newham_lat
-        center_lon = newham_lon
 
     # Create base map
     m = folium.Map(
@@ -396,6 +481,26 @@ def build_folium_map(df, heritage_sites, conservation_areas, filters, documents)
     # Create a layer for nearby heritage sites
     heritage_sites_layer = folium.FeatureGroup(
         name="Nearby Heritage Sites (within 100m)", show=True).add_to(m)
+
+    # ==================== POSTCODE SEARCH MARKER ====================
+
+    if postcode_coords and 'latitude' in postcode_coords and 'longitude' in postcode_coords:
+        postcode_popup = f"""
+        <div style="font-family: Arial; font-size: 12px; width: 200px;">
+            <b>Postcode Search Center</b><br>
+            <b>Postcode:</b> {postcode_coords.get('postcode', 'N/A')}<br>
+            <b>Latitude:</b> {postcode_coords.get('latitude', 'N/A'):.6f}<br>
+            <b>Longitude:</b> {postcode_coords.get('longitude', 'N/A'):.6f}
+        </div>
+        """
+
+        folium.Marker(
+            location=[postcode_coords['latitude'],
+                      postcode_coords['longitude']],
+            popup=folium.Popup(postcode_popup, max_width=250),
+            tooltip="Postcode Search Center",
+            icon=folium.Icon(color="red", icon="location-dot", prefix="fa"),
+        ).add_to(m)
 
     # ==================== PLANNING APPLICATIONS LAYER ====================
 
@@ -645,6 +750,24 @@ def main():
         filters["search_query"]
     )
 
+    # Handle postcode search
+    postcode_coords = None
+    if filters.get("postcode"):
+        with st.spinner(f"🔍 Searching for applications near postcode {filters['postcode']}..."):
+            df_postcode_filtered, postcode_coords = filter_applications_by_postcode(
+                df_filtered, filters["postcode"], radius_km=filters.get(
+                    "postcode_radius_m", 500) / 1000
+            )
+
+        if 'error' in postcode_coords:
+            st.sidebar.error(f"❌ {postcode_coords['error']}")
+            df_filtered = df_filtered  # Keep original filtered data
+            postcode_coords = None
+        else:
+            df_filtered = df_postcode_filtered
+            st.sidebar.success(
+                f"✅ Postcode {postcode_coords.get('postcode')} found! Showing {len(df_filtered)} nearby applications within {filters.get('postcode_radius_m', 500)}m")
+
     # Display metrics
     display_metrics(df_filtered)
 
@@ -664,7 +787,7 @@ def main():
     else:
         with st.spinner("🗺️ Building map..."):
             m = build_folium_map(df_filtered, heritage_sites,
-                                 conservation_areas, filters, documents)
+                                 conservation_areas, filters, documents, postcode_coords)
 
         if m:
             map_data = st_folium(m, width=1400, height=700, returned_objects=[
