@@ -36,13 +36,13 @@ logger = logging.getLogger(__name__)
 
 # ==================== STREAMLIT PAGE CONFIG ====================
 st.set_page_config(
-    page_title="Planning Application Watchdog v2",
+    page_title="TerraNotice",
     page_icon="🗺️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-st.title("🗺️ Planning Application Watchdog v2")
+st.title("🗺️ TerraNotice")
 
 # ==================== UTILITY FUNCTIONS ====================
 
@@ -704,23 +704,108 @@ def build_folium_map(df, heritage_sites, conservation_areas, filters, documents,
 
     return m
 
+# ==================== CARD STYLING & STATUS MAPPING ====================
+
+
+# Dashboard theme colors (from config.toml)
+THEME_PRIMARY = "#2e7d32"
+THEME_BG = "#0d1f12"
+THEME_BG_SECONDARY = "#1b3a20"
+THEME_TEXT = "#e6f2e6"
+THEME_TEXT_MUTED = "#a3d8a3"
+
+# Map application status to card border color (adapted for dark theme)
+STATUS_COLOR_MAP = {
+    "Permitted": "#4ade80",      # Bright green for dark theme
+    "Undecided": "#fbbf24",      # Amber for dark theme
+    "Withdrawn": "#f87171",      # Bright red for dark theme
+    "N/A": "#9ca3af",            # Gray
+}
+
+# Map application status to badge text
+STATUS_BADGE_MAP = {
+    "Permitted": "✓ Permitted",
+    "Undecided": "⏳ Undecided",
+    "Withdrawn": "✗ Withdrawn",
+    "N/A": "• No Status",
+}
+
+
+def get_status_color(status: str) -> str:
+    """Get the color for a given application status."""
+    return STATUS_COLOR_MAP.get(status, "#9ca3af")
+
+
+def get_status_badge(status: str) -> str:
+    """Get the badge text for a given application status."""
+    return STATUS_BADGE_MAP.get(status, "• Unknown")
+
+
+def build_application_card_html(app_info: dict, summary_html: str = None) -> str:
+    """Build an HTML card for displaying application details."""
+    uid = app_info.get("uid", "N/A")
+    address = app_info.get("address", "N/A")
+    # Use "type" instead of "app_type" since convert_info_to_dict lowercases keys from popup
+    app_type = app_info.get("type", app_info.get("app_type", "N/A"))
+    area = app_info.get("area", "N/A")
+    # Use "status" instead of "app_state" since convert_info_to_dict lowercases keys from popup
+    status = app_info.get("status", app_info.get("app_state", "N/A"))
+
+    status_color = get_status_color(status)
+    status_badge = get_status_badge(status)
+
+    # Escape any HTML characters in text fields
+    uid = uid.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    address = address.replace("&", "&amp;").replace(
+        "<", "&lt;").replace(">", "&gt;")
+    app_type = app_type.replace("&", "&amp;").replace(
+        "<", "&lt;").replace(">", "&gt;")
+    area = area.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    summary_section = ""
+    if summary_html:
+        summary_section = f'<div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #2d5a35;"><div style="font-size: 13px; font-weight: 600; color: {THEME_TEXT}; margin-bottom: 8px;">📋 AI Summary</div><div style="font-size: 13px; line-height: 1.5; color: {THEME_TEXT};">{summary_html}</div></div>'
+
+    card_html = f'<div style="border: 1px solid #2d5a35; border-left: 4px solid {status_color}; border-radius: 8px; padding: 16px; background-color: {THEME_BG_SECONDARY}; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif;"><div style="margin-bottom: 12px;"><div style="font-size: 16px; font-weight: 700; color: {THEME_TEXT}; word-break: break-word;">{uid}</div><div style="font-size: 12px; font-weight: 500; color: {status_color}; margin-top: 4px;">{status_badge}</div></div><div style="height: 1px; background-color: #2d5a35; margin: 12px 0;"></div><div style="margin-bottom: 8px;"><div style="margin-bottom: 10px;"><div style="font-size: 12px; font-weight: 500; color: {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Address</div><div style="font-size: 13px; color: {THEME_TEXT}; word-break: break-word;">{address}</div></div><div style="margin-bottom: 10px;"><div style="font-size: 12px; font-weight: 500; color: {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Type</div><div style="font-size: 13px; color: {THEME_TEXT};">{app_type}</div></div><div><div style="font-size: 12px; font-weight: 500; color: {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Council</div><div style="font-size: 13px; color: {THEME_TEXT};">{area}</div></div></div>{summary_section}</div>'
+
+    return card_html
+
+
+def build_empty_card_html() -> str:
+    """Build an empty card with instructions for when no application is selected."""
+    return f'<div style="border: 1px solid #2d5a35; border-left: 4px solid {THEME_PRIMARY}; border-radius: 8px; padding: 24px; background-color: {THEME_BG_SECONDARY}; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif; text-align: center;"><div style="font-size: 32px; margin-bottom: 12px;">👆</div><div style="font-size: 14px; font-weight: 500; color: {THEME_TEXT_MUTED};">Click a marker on the map to view application details</div></div>'
+
+
 # ==================== GET AI SUMMARY OF LATEST CLICKED APPLICATION ====================
 
 
 def get_latest_application_summary(session: boto3.Session, map_data: dict, documents: dict) -> str:
-    st.subheader(
-        "Summary", help="AI-generated summary of the most recently selected planning application on the map.")
     latest_app_info = map_data.get(
         "last_object_clicked_popup") if map_data else None
 
     if latest_app_info and "UID" in latest_app_info:
         latest_app_info = convert_info_to_dict(latest_app_info)
-        st.success(f"Application UID: **{latest_app_info['uid']}**")
+
+        # Show placeholder while generating summary
+        summary_placeholder = st.empty()
+        summary_placeholder.markdown(
+            build_empty_card_html(), unsafe_allow_html=True)
+
+        # Generate AI summary
         with st.spinner("Generating summary..."):
-            summary = get_ai_summary(session, latest_app_info, documents)
-            st.info(summary)
+            summary_text = get_ai_summary(session, latest_app_info, documents)
+
+        # Build and display card with summary
+        if summary_text:
+            card_html = build_application_card_html(
+                latest_app_info, summary_text)
+        else:
+            card_html = build_application_card_html(latest_app_info)
+
+        summary_placeholder.markdown(card_html, unsafe_allow_html=True)
     else:
-        st.warning("No application selected.")
+        # Show empty state card
+        st.markdown(build_empty_card_html(), unsafe_allow_html=True)
 
 
 # ==================== MAIN APPLICATION ====================
@@ -785,16 +870,22 @@ def main():
         st.warning(
             "⚠️ No applications match your filters. Try adjusting your selection.")
     else:
-        with st.spinner("🗺️ Building map..."):
-            m = build_folium_map(df_filtered, heritage_sites,
-                                 conservation_areas, filters, documents, postcode_coords)
+        # Create two-column layout: map (70%) + summary (30%)
+        col_map, col_summary = st.columns([7, 3], gap="medium")
 
-        if m:
-            map_data = st_folium(m, width=1400, height=700, returned_objects=[
-                "last_object_clicked_popup"])
+        map_data = None
+        with col_map:
+            with st.spinner("🗺️ Building map..."):
+                m = build_folium_map(df_filtered, heritage_sites,
+                                     conservation_areas, filters, documents, postcode_coords)
 
-    # Display summary for the latest clicked application on the map
-    get_latest_application_summary(session, map_data, documents)
+            if m:
+                map_data = st_folium(m, width=670, height=700, returned_objects=[
+                    "last_object_clicked_popup"])
+
+        with col_summary:
+            # Display summary for the latest clicked application on the map
+            get_latest_application_summary(session, map_data, documents)
 
     # Display results table
     st.subheader("📋 Filtered Results")

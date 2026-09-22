@@ -5,6 +5,8 @@ EXPOSE 8501
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
+COPY .streamlit .
+COPY assets .
 COPY .env .
 
 COPY dashboard_v2.py .
