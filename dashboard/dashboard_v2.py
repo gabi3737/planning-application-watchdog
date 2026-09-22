@@ -36,13 +36,13 @@ logger = logging.getLogger(__name__)
 
 # ==================== STREAMLIT PAGE CONFIG ====================
 st.set_page_config(
-    page_title="Planning Application Watchdog v2",
+    page_title="TerraNotice",
     page_icon="🗺️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-st.title("🗺️ Planning Application Watchdog v2")
+st.title("🗺️ TerraNotice")
 
 # ==================== UTILITY FUNCTIONS ====================
 
@@ -745,9 +745,11 @@ def build_application_card_html(app_info: dict, summary_html: str = None) -> str
     """Build an HTML card for displaying application details."""
     uid = app_info.get("uid", "N/A")
     address = app_info.get("address", "N/A")
-    app_type = app_info.get("app_type", "N/A")
+    # Use "type" instead of "app_type" since convert_info_to_dict lowercases keys from popup
+    app_type = app_info.get("type", app_info.get("app_type", "N/A"))
     area = app_info.get("area", "N/A")
-    status = app_info.get("app_state", "N/A")
+    # Use "status" instead of "app_state" since convert_info_to_dict lowercases keys from popup
+    status = app_info.get("status", app_info.get("app_state", "N/A"))
 
     status_color = get_status_color(status)
     status_badge = get_status_badge(status)
@@ -878,7 +880,7 @@ def main():
                                      conservation_areas, filters, documents, postcode_coords)
 
             if m:
-                map_data = st_folium(m, width=600, height=700, returned_objects=[
+                map_data = st_folium(m, width=670, height=700, returned_objects=[
                     "last_object_clicked_popup"])
 
         with col_summary:
