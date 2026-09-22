@@ -25,12 +25,20 @@ from botocore.exceptions import ClientError
 # Import pipeline modules for orchestration
 try:
     from extract import extract_all_areas
-    from transform import transform_dataframes
+    from transform import (
+        transform_dataframes,
+        get_boto3_session,
+        get_openai_client,
+        generate_record_summary,
+    )
     import transform as transform_module
 except ImportError:
     extract_all_areas = None
     transform_dataframes = None
     transform_module = None
+    get_boto3_session = None
+    get_openai_client = None
+    generate_record_summary = None
 
 # Configuration
 DATA_DIR = Path(__file__).parent / "data"
@@ -121,38 +129,36 @@ def csv_row_to_dynamodb_item(row: pd.Series) -> Tuple[Dict[str, Any], Dict[str, 
 
 def has_data_changed(existing_item: Dict[str, Any], current_row: Dict[str, Any], uid: str) -> Tuple[bool, List[str]]:
     """
-    Compare existing DynamoDB item with current row to detect changes.
+    Check if application status (app_state) has changed.
     
-    Ignores summary and certain metadata fields that change frequently.
+    Only regenerates summaries when the decision status changes, since that's the 
+    most significant change to a planning application (e.g., Undecided → Permitted).
     
     Returns:
         (has_changed: bool, changed_fields: List[str])
     """
-    # Fields to ignore when checking for changes
-    IGNORE_FIELDS = {"summary", "updated_at", "created_at", "timestamp"}
+    current_app_state = str(current_row.get("app_state", ""))
+    existing_app_state = str(existing_item.get("app_state", ""))
     
+    has_changed = current_app_state != existing_app_state
     changed_fields = []
     
-    # Check all fields in current row
-    for field, current_value in current_row.items():
-        if field in IGNORE_FIELDS:
-            continue
-            
-        # Handle null values in comparison
-        current_str = str(current_value) if pd.notna(current_value) else ""
-        existing_value = existing_item.get(field, "")
-        existing_str = str(existing_value) if existing_value else ""
-        
-        if current_str != existing_str:
-            changed_fields.append(f"{field}: '{existing_str[:50]}' → '{current_str[:50]}'")
+    if has_changed:
+        changed_fields.append(f"app_state: '{existing_app_state}' → '{current_app_state}'")
     
-    has_changed = len(changed_fields) > 0
     return has_changed, changed_fields
 
 
 def load_dataframe(table, df: pd.DataFrame, area_name: str, no_db: bool = False) -> Tuple[int, int, int]:
     """
-    Load a single DataFrame into DynamoDB.
+    Load a single DataFrame into DynamoDB with conditional summary generation.
+
+    Summaries are generated ONLY for:
+    - New records (not in DynamoDB yet)
+    - Existing records where application data has changed
+
+    Summaries are REUSED for:
+    - Existing records with no data changes
 
     Returns: (created_count, updated_count, failed_count)
     """
@@ -162,18 +168,24 @@ def load_dataframe(table, df: pd.DataFrame, area_name: str, no_db: bool = False)
 
     logger.info(f"Loading {len(df)} records from {area_name}")
 
-    # Defensive check: warn if summary column is missing
-    if "summary" not in df.columns:
-        logger.warning(f"⚠️ Summary column missing from {area_name} dataframe - summaries will NOT be loaded")
-    else:
-        null_count = df["summary"].isna().sum()
-        if null_count > 0:
-            logger.warning(f"⚠️ {null_count} rows in {area_name} have null summaries")
-        logger.info(f"✓ Summary column present: {len(df) - null_count} rows with summaries")
+    # Initialize boto3 and OpenAI clients for conditional summary generation
+    session = None
+    openai_client = None
+    try:
+        if get_boto3_session is not None:
+            session = get_boto3_session()
+        if get_openai_client is not None:
+            openai_client = get_openai_client()
+    except Exception as e:
+        logger.warning(f"Could not initialize AWS/OpenAI clients for summary generation: {e}")
+        session = None
+        openai_client = None
 
     created_count = 0
     updated_count = 0
     failed_count = 0
+    summary_generated_count = 0
+    summary_reused_count = 0
 
     for idx, row in df.iterrows():
         keys, attributes = csv_row_to_dynamodb_item(row)
@@ -192,24 +204,46 @@ def load_dataframe(table, df: pd.DataFrame, area_name: str, no_db: bool = False)
                 existing = table.get_item(Key=keys)
                 is_update = "Item" in existing
                 existing_item = existing.get("Item", {})
-                summary_reused = False
                 
-                # If updating, check if data has actually changed
                 if is_update:
+                    # Existing record - check if data has changed
                     has_changed, changed_fields = has_data_changed(existing_item, row.to_dict(), uid)
                     
                     if not has_changed:
-                        # No data changes - reuse existing summary to avoid unnecessary API calls
+                        # No data changes - reuse existing summary
                         existing_summary = existing_item.get("summary", "")
-                        if existing_summary and "summary" in attributes:
+                        if existing_summary:
                             attributes["summary"] = existing_summary
-                            summary_reused = True
+                            summary_reused_count += 1
                             logger.info(f"  ✓ {uid} (no changes, reusing existing summary)")
+                        else:
+                            # No previous summary, keep current value
+                            logger.info(f"  ✓ {uid} (no changes, no previous summary)")
                     else:
-                        # Data has changed - log what changed
-                        logger.info(f"  ✓ {uid} (changes detected, regenerating summary)")
+                        # Data has changed - generate new summary if we have clients
+                        logger.info(f"  ✓ {uid} (changes detected)")
                         for change in changed_fields:
                             logger.info(f"      • {change}")
+                        
+                        if session and openai_client and "summary" in attributes:
+                            logger.info(f"      Generating new summary...")
+                            new_summary = generate_record_summary(session, openai_client, row)
+                            if new_summary:
+                                attributes["summary"] = new_summary
+                                summary_generated_count += 1
+                            logger.info(f"      Summary: {new_summary[:80]}...")
+                else:
+                    # New record - generate summary if we have clients
+                    if session and openai_client and "summary" in attributes:
+                        logger.info(f"  ✓ {uid} (new record)")
+                        logger.info(f"      Generating summary...")
+                        new_summary = generate_record_summary(session, openai_client, row)
+                        if new_summary:
+                            attributes["summary"] = new_summary
+                            summary_generated_count += 1
+                        logger.info(f"      Summary: {new_summary[:80]}...")
+                    else:
+                        logger.info(f"  ✓ {uid} (new record, no summary generation)")
 
                 # Build update expression to set all attributes
                 update_parts = []
@@ -243,7 +277,6 @@ def load_dataframe(table, df: pd.DataFrame, area_name: str, no_db: bool = False)
                 if is_update:
                     updated_count += 1
                 else:
-                    logger.info(f"  ✓ {uid} (new record)")
                     created_count += 1
         except ClientError as e:
             logger.error(f"Failed to load row {idx + 1}: {e}")
@@ -251,6 +284,9 @@ def load_dataframe(table, df: pd.DataFrame, area_name: str, no_db: bool = False)
 
     logger.info(
         f"  {area_name}: {created_count} created, {updated_count} updated, {failed_count} failed")
+    if summary_generated_count > 0 or summary_reused_count > 0:
+        logger.info(
+            f"  Summaries: {summary_generated_count} generated, {summary_reused_count} reused")
     return created_count, updated_count, failed_count
 
 

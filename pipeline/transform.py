@@ -60,8 +60,9 @@ AWS_REGION = os.getenv("AWS_REGION", "eu-west-2")
 _s3_session = None
 _openai_client = None
 
-# Feature flag to skip summary generation (useful for local testing without AWS)
-SKIP_SUMMARY = False
+# Note: Summary generation functions moved to load.py for deferred execution
+# This allows summaries to be generated only after comparing with existing records
+# to avoid unnecessary API calls
 
 
 def get_boto3_session() -> boto3.Session:
@@ -325,19 +326,14 @@ def transform_dataframe(df: pd.DataFrame, area_name: str) -> Tuple[pd.DataFrame,
     # Type cast
     df, casting_errors = typecast_columns(df)
 
-    # Generate AI summaries
-    logger.info(
-        f"Generating AI summaries for {len(df)} records in {area_name}...")
-    df, summary_errors = generate_summaries_for_dataframe(df)
-
-    # Validate
+    # Validate (summary will be generated later in load stage if needed)
     df, validation_report = validate_data(df)
 
     report = {
         "area_name": area_name,
         "rows_processed": len(df),
         "type_casting_errors": casting_errors,
-        "summary_errors": summary_errors,
+        "summary_errors": 0,  # Summaries generated in load stage
         "validation_report": validation_report,
     }
 
