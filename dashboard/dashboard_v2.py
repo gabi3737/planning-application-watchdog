@@ -425,6 +425,7 @@ def setup_sidebar_filters(df):
 
 # ==================== FOLIUM MAP BUILDER ====================
 
+
 def build_folium_map(df, heritage_sites, conservation_areas, filters, postcode_coords=None):
     """Build the folium map with all layers and features."""
 
@@ -434,7 +435,14 @@ def build_folium_map(df, heritage_sites, conservation_areas, filters, postcode_c
         return None
 
     # Determine map center
-    if postcode_coords and 'latitude' in postcode_coords and 'longitude' in postcode_coords:
+    # Check if a focused location has been set via button click
+    if 'focused_location' in st.session_state and st.session_state.focused_location:
+        center_lat = st.session_state.focused_location['lat']
+        center_lon = st.session_state.focused_location['lon']
+        logger.info(
+            f"Map focused on application {st.session_state.focused_location.get('uid', 'Unknown')}")
+        del st.session_state.focused_location
+    elif postcode_coords and 'latitude' in postcode_coords and 'longitude' in postcode_coords:
         # Use postcode coordinates as center
         center_lat = postcode_coords['latitude']
         center_lon = postcode_coords['longitude']
@@ -831,6 +839,7 @@ def create_application_card(app: dict) -> str:
     area = app.get("area", "N/A")
     # Use "status" instead of "app_state" since convert_info_to_dict lowercases keys from popup
     status = app.get("status", app.get("app_state", "N/A"))
+    summary = app.get("summary", "No Summary Available")
 
     status_color = get_status_color(status)
     status_badge = get_status_badge(status)
@@ -842,36 +851,78 @@ def create_application_card(app: dict) -> str:
     app_type = app_type.replace("&", "&amp;").replace(
         "<", "&lt;").replace(">", "&gt;")
     area = area.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    summary = summary.replace("&", "&amp;").replace(
+        "<", "&lt;").replace(">", "&gt;")
 
-    card_html = f'<div style="border: 1px solid #2d5a35; border-left: 4px solid {status_color}; border-radius: 0px; padding: 16px; background-color: {THEME_BG_SECONDARY}; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif; min-height: 350px; display: flex; flex-direction: column;"><div style="margin-bottom: 12px;"><div style="font-size: 16px; font-weight: 700; color: {THEME_TEXT}; word-break: break-word;">{uid}</div><div style="font-size: 12px; font-weight: 500; color: {status_color}; margin-top: 4px;">{status_badge}</div></div><div style="height: 1px; background-color: #2d5a35; margin: 12px 0;"></div><div style="margin-bottom: 8px; flex: 1;"><div style="margin-bottom: 10px;"><div style="font-size: 12px; font-weight: 500; color: {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Address</div><div style="font-size: 13px; color: {THEME_TEXT}; word-break: break-word;">{address}</div></div><div style="margin-bottom: 10px;"><div style="font-size: 12px; font-weight: 500; color: {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Type</div><div style="font-size: 13px; color: {THEME_TEXT};">{app_type}</div></div><div><div style="font-size: 12px; font-weight: 500; color: {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Council</div><div style="font-size: 13px; color: {THEME_TEXT};">{area}</div></div>'
+    card_html = f"""<div style="border: 1px solid #2d5a35; border-left: 4px solid {status_color};
+     border-radius: 0px; padding: 16px; background-color: {THEME_BG_SECONDARY};
+     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); font-family: -apple-system, 
+     BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif; min-height: 350px; 
+     display: flex; flex-direction: column;"><div style="margin-bottom: 12px;">
+     <div style="font-size: 16px; font-weight: 700; color: {THEME_TEXT}; word-break: 
+     break-word;">{uid}</div><div style="font-size: 12px; font-weight: 500; 
+     color: {status_color}; margin-top: 4px;">{status_badge}</div></div><div style="height: 
+     1px; background-color: #2d5a35; margin: 12px 0;"></div><div style="margin-bottom: 8px; 
+     flex: 1;"><div style="margin-bottom: 10px;"><div style="font-size: 12px; font-weight: 
+     500; color: {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">
+     Address</div><div style="font-size: 13px; color: {THEME_TEXT}; word-break: break-word;">
+     {address}</div></div><div style="margin-bottom: 10px;"><div style="font-size: 12px;
+     font-weight: 500; color: {THEME_TEXT_MUTED}; text-transform: uppercase; 
+     letter-spacing: 0.5px;">Type</div><div style="font-size: 13px; color: {THEME_TEXT};">
+     {app_type}</div></div><div><div style="font-size: 12px; font-weight: 500; color: 
+     {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Council
+     </div><div style="font-size: 13px; color: {THEME_TEXT};">{area}</div></div></div>
+     <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #2d5a35;">
+     <details style="cursor: pointer;"><summary style="font-size: 12px; font-weight: 600; 
+     color: {THEME_TEXT}; padding: 4px; user-select: none;">📋 Summary</summary>
+     <div style="font-size: 13px; line-height: 1.5; color: {THEME_TEXT}; margin-top: 8px; 
+     padding: 8px; background-color: #0d1f12; border-radius: 0px;">{summary}</div></details></div></div>"""
 
     return card_html
 
 
-# def display_filtered_applications(df: pd.DataFrame, original_count: int):
-#     """Display filtered applications with integrated buttons. Returns focused coordinates if a button is clicked."""
-#     focused_coords = None
+def update_session_location(lat, lon, uid=None):
+    """Update the session state with the focused location."""
+    st.session_state.focused_location = {
+        'lat': lat,
+        'lon': lon,
+        'uid': uid or 'N/A'
+    }
 
-#     if not df.empty:
-#         display_cols = ["uid", "address", "app_type",
-#                         "app_state", "area", "start_date", "location_y", "location_x"]
-#         display_df = df[display_cols].copy()
 
-#         # Create 3-column layout
-#         col = 0
-#         cols = st.columns(3, gap="medium")
-#         for row, data in display_df.iterrows():
-#             with cols[col]:
-#                 result = display_card_with_button(data)
-#                 if result:
-#                     focused_coords = result
-#             col = (col + 1) % 3
-#         st.info(
-#             f"✅ Showing {len(df)} of {original_count} total applications")
-#     else:
-#         st.info("No applications to display with current filters.")
+def display_filtered_applications(df: pd.DataFrame, original_count: int):
+    """Display filtered applications with integrated buttons. Returns focused coordinates if a button is clicked."""
+    focused_coords = None
 
-#     return focused_coords
+    if not df.empty:
+        display_cols = ["uid", "address", "app_type",
+                        "app_state", "area", "start_date",
+                        "location_y", "location_x", "summary"]
+        display_df = df[display_cols].copy()
+
+        # Create 3-column layout
+        col = 0
+        cols = st.columns(3, gap="medium")
+        for row, data in display_df.iterrows():
+            with cols[col]:
+                card = create_application_card(data)
+                st.markdown(card, unsafe_allow_html=True)
+
+                # Focus Map button with on_click callback
+                # st.button(
+                #     "🗺️ Focus Map",
+                #     key=f"focus_map_{data.get('uid')}",
+                #     use_container_width=True,
+                #     on_click=lambda lat=data.get('location_y'), lon=data.get(
+                #         'location_x'), uid=data.get('uid', 'N/A'): update_session_location(lat, lon, uid)
+                # )
+
+                st.space(10)
+            col = (col + 1) % 3
+        st.info(
+            f"✅ Showing {len(df)} of {original_count} total applications")
+    else:
+        st.info("No applications to display with current filters.")
 
 
 # ==================== MAIN APPLICATION ====================
@@ -954,9 +1005,9 @@ def main():
     # Display results table
     st.subheader("📋 Filtered Results")
 
-    # application_no = len(df_all)
-    # focused_coords = display_filtered_applications(
-    #     df_filtered, application_no)
+    application_no = len(df_all)
+    display_filtered_applications(
+        df_filtered, application_no)
 
 
 if __name__ == "__main__":
