@@ -7,4 +7,4 @@ RUN pip install -r requirements.txt
 
 COPY notification.py .
 
-CMD ["notification.lambda_handler"]
+CMD [ "notification.handler" ]

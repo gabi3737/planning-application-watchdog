@@ -227,7 +227,7 @@ def main() -> dict[str, str]:
     return send_all_emails(session, notifications, sender=EMAIL_HOST)
 
 
-def lambda_handler(event, context):
+def handler(event, context):
     """AWS Lambda entry point for the daily notification pipeline."""
     try:
         result = main()
