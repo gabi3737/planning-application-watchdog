@@ -34,5 +34,4 @@ variable "subnet_group_name" {
 variable "account_id" {
   type        = string
   description = "AWS account ID"
-  default = "129033205317"
 }
