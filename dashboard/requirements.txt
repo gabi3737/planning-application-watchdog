@@ -1,5 +1,6 @@
 streamlit
 folium
+altair[all]
 streamlit-folium
 curl-cffi
 boto3
