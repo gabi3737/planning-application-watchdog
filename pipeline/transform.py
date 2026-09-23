@@ -111,37 +111,42 @@ def fetch_pdf_from_s3(session: boto3.Session, uid: str) -> Optional[bytes]:
 
     Args:
         session: boto3 Session
-        uid: Application UID (e.g., "Greenwich_26_2646_SD")
+        uid: Application UID (e.g., "Greenwich/26/2646/SD" or "Greenwich_26_2646_SD")
 
     Returns:
         PDF content as bytes, or None if not found
     """
     s3_client = session.client("s3", region_name=AWS_REGION)
     try:
+        # Convert forward slashes to underscores to match S3 path structure
+        uid_for_s3 = uid.replace("/", "_")
+        logger.info(
+            f"🔍 Fetching PDF from S3 for UID: {uid} (S3 path: {uid_for_s3})")
         # List objects with prefix matching the UID
         paginator = s3_client.get_paginator("list_objects_v2")
         pages = paginator.paginate(
             Bucket=S3_BUCKET,
-            Prefix=f"documents/{uid}/"
+            Prefix=f"documents/{uid_for_s3}/"
         )
 
         for page in pages:
             for obj in page.get("Contents", []):
                 if obj["Key"].endswith(".pdf") or obj["Key"].endswith(".PDF"):
-                    logger.debug(f"Found PDF in S3: {obj['Key']}")
+                    logger.info(f"📦 Found PDF in S3: {obj['Key']}")
                     response = s3_client.get_object(
                         Bucket=S3_BUCKET, Key=obj["Key"])
                     pdf_content = response["Body"].read()
-                    logger.info(f"Successfully fetched PDF for {uid} from S3")
+                    logger.info(
+                        f"✅ Successfully fetched PDF for {uid} from S3 ({len(pdf_content)} bytes)")
                     return pdf_content
 
-        logger.debug(f"No PDF found in S3 for {uid}")
+        logger.warning(f"❌ No PDF found in S3 for {uid}")
         return None
     except ClientError as e:
-        logger.warning(f"Error fetching PDF from S3 for {uid}: {e}")
+        logger.warning(f"❌ ClientError fetching PDF from S3 for {uid}: {e}")
         return None
     except Exception as e:
-        logger.warning(f"Unexpected error fetching PDF for {uid}: {e}")
+        logger.warning(f"❌ Unexpected error fetching PDF for {uid}: {e}")
         return None
 
 
@@ -155,17 +160,27 @@ def extract_pdf_text(pdf_bytes: bytes) -> str:
         Extracted text as string
     """
     try:
+        logger.info(
+            f"📄 Starting PDF text extraction (PDF size: {len(pdf_bytes)} bytes)")
         extracted = []
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-            for page in pdf.pages:
+            logger.info(f"📖 PDF has {len(pdf.pages)} pages")
+            for page_num, page in enumerate(pdf.pages, 1):
                 text = page.extract_text()
                 if text:
+                    logger.debug(
+                        f"  Page {page_num}: extracted {len(text)} characters")
                     extracted.append(text)
+                else:
+                    logger.debug(f"  Page {page_num}: no text extracted")
         result = "\n".join(extracted)
-        logger.debug(f"Extracted {len(result)} characters from PDF")
+        logger.info(
+            f"✅ PDF extraction complete: {len(result)} total characters extracted")
+        if len(result) == 0:
+            logger.warning("⚠️  WARNING: PDF extraction returned empty text!")
         return result
     except Exception as e:
-        logger.warning(f"Error extracting text from PDF: {e}")
+        logger.warning(f"❌ Error extracting text from PDF: {e}")
         return ""
 
 
@@ -181,6 +196,14 @@ def generate_summary(openai_client: OpenAI, pdf_text: str, metadata_dict: dict) 
         Summary string (or empty string on error)
     """
     try:
+        uid = metadata_dict.get("uid", "unknown")
+        logger.info(f"🤖 [UID: {uid}] Generating summary...")
+        logger.info(
+            f"   PDF Text Status: {'✅ Present' if pdf_text else '❌ EMPTY'} ({len(pdf_text)} chars)")
+        if pdf_text:
+            logger.debug(f"   PDF Text Preview: {pdf_text[:200]}...")
+        logger.debug(f"   Metadata: {metadata_dict}")
+
         system_role = """
         You are a precise AI assistant which intakes both general information
         and PDF documents on planning applications. You provide a clear plain-English
@@ -227,6 +250,7 @@ def generate_summary(openai_client: OpenAI, pdf_text: str, metadata_dict: dict) 
         {pdf_text}
         """
 
+        logger.debug(f"   Calling OpenAI API...")
         response = openai_client.beta.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
@@ -241,7 +265,7 @@ def generate_summary(openai_client: OpenAI, pdf_text: str, metadata_dict: dict) 
             ]
         )
         summary = response.choices[0].message.content
-        logger.info(f"🤖 OpenAI Response: {summary}")
+        logger.info(f"✅ [UID: {uid}] OpenAI Response: {summary}")
         return summary
     except Exception as e:
         logger.warning(f"Error generating summary with OpenAI: {e}")
@@ -263,6 +287,9 @@ def generate_record_summary(session: boto3.Session, openai_client: OpenAI, row_d
         Summary string (or empty string on error)
     """
     try:
+        uid = str(row_data.get("uid", ""))
+        logger.info(f"\n📋 Starting summary generation for: {uid}")
+
         # Build metadata dictionary from row
         metadata_dict = {
             "address": str(row_data.get("address", "N/A")),
@@ -271,23 +298,32 @@ def generate_record_summary(session: boto3.Session, openai_client: OpenAI, row_d
             "app_size": str(row_data.get("app_size", "N/A")),
             "area": str(row_data.get("area_name", "N/A")),
             "url": str(row_data.get("url", "N/A")),
+            "uid": uid,
         }
 
         # Attempt to fetch PDF from S3
-        uid = str(row_data.get("uid", ""))
         pdf_text = ""
 
         if uid and uid != "N/A":
+            logger.info(f"  Step 1: Fetching PDF from S3...")
             pdf_bytes = fetch_pdf_from_s3(session, uid)
             if pdf_bytes:
+                logger.info(f"  Step 2: Extracting text from PDF...")
                 pdf_text = extract_pdf_text(pdf_bytes)
+            else:
+                logger.warning(
+                    f"  Step 2: No PDF found, will use metadata only")
+        else:
+            logger.warning(f"  Invalid UID: {uid}")
 
         # Generate summary (works with or without PDF text)
+        logger.info(f"  Step 3: Generating summary with OpenAI...")
         summary = generate_summary(openai_client, pdf_text, metadata_dict)
+        logger.info(f"  ✅ Summary generation complete for {uid}\n")
         return summary
 
     except Exception as e:
-        logger.error(f"Error generating record summary: {e}")
+        logger.error(f"❌ Error generating record summary for {uid}: {e}")
         return ""
 
 
