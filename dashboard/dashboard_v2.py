@@ -153,7 +153,7 @@ def load_conservation_areas_data():
     try:
         # Use same regional center as heritage sites
         conservation_areas = get_conservation_areas(
-            latitude=51.51, longitude=-0.01, radius=20000)
+            latitude=51.51, longitude=-0.01, radius=5000)
         logger.info(f"Loaded {len(conservation_areas)} conservation areas")
         return conservation_areas
 
