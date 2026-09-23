@@ -19,18 +19,20 @@ logging.basicConfig(
 
 
 def create_boto3_session() -> boto3.Session:
-    """Creates and returns a boto3 session using environment variables for AWS credentials and region."""
-    if not os.getenv("ACCESS_KEY_ID") or not os.getenv("SECRET_ACCESS_KEY"):
-        logging.error(
-            "ACCESS_KEY_ID and SECRET_ACCESS_KEY must be set in the environment.")
-        raise ValueError(
-            "ACCESS_KEY_ID and SECRET_ACCESS_KEY must be set in the environment.")
+    """Creates and returns a boto3 session using environment variables or Lambda role credentials."""
+    region = os.getenv("AWS_REGION", "eu-west-2")
+    key = os.getenv("ACCESS_KEY_ID")
+    secret = os.getenv("SECRET_ACCESS_KEY")
 
-    return boto3.Session(
-        aws_access_key_id=os.getenv("ACCESS_KEY_ID"),
-        aws_secret_access_key=os.getenv("SECRET_ACCESS_KEY"),
-        region_name=os.getenv("AWS_REGION", "eu-west-2")
-    )
+    if key and secret:
+        return boto3.Session(
+            aws_access_key_id=key,
+            aws_secret_access_key=secret,
+            region_name=region,
+        )
+
+    # Fallback to instance/role credentials (used in Lambda)
+    return boto3.Session(region_name=region)
 
 
 def create_ses_session(session: boto3.Session) -> boto3.client:

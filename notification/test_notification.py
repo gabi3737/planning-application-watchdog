@@ -1,3 +1,5 @@
+# pylint: skip-file
+
 """Tests for notification module."""
 
 from unittest.mock import patch, Mock
