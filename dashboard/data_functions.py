@@ -187,7 +187,8 @@ def get_planning_applications_by_area(_session: boto3.Session, latitude: float,
                     "location_x": float(row.get("location_x", 0)),
                     "location_y": float(row.get("location_y", 0)),
                     "url": row.get("url", "#"),
-                    "area_name": row.get("area_name", "N/A")
+                    "area_name": row.get("area_name", "N/A"),
+                    "summary": row.get("summary", "No Summary Available")
                 })
 
         logger.info(

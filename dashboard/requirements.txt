@@ -7,6 +7,4 @@ pandas
 pytest
 pylint
 python-dotenv
-pydantic
-openai
 pdfplumber

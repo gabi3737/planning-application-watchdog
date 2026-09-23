@@ -212,24 +212,6 @@ def get_ai_summary(_session: boto3.Session, data: dict, documents: dict) -> str:
         return ""
 
 
-def convert_info_to_dict(info_string: str) -> dict:
-    """Convert application info string to dictionary, ignoring the last line."""
-    lines = info_string.strip().split('\n')
-
-    # Remove the last line (View on Council Website link)
-    lines = lines[:-1]
-
-    result = {}
-    for line in lines:
-        if ':' in line:
-            key, value = line.split(':', 1)
-            key = key.strip().lower()
-            value = value.strip()
-            result[key] = value
-
-    return result
-
-
 if __name__ == "__main__":
     session = create_boto3_session()
     uid = "Greenwich_26_2646_SD"
