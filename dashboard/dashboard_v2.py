@@ -14,7 +14,6 @@ from streamlit_folium import st_folium
 import pandas as pd
 import logging
 import re
-import boto3
 from datetime import datetime, timedelta
 from data_functions import (
     load_application_data,
@@ -25,7 +24,6 @@ from data_functions import (
     calculate_distance,
     get_postcode_coordinates,
 )
-from ai_summary_functions import load_documents, convert_info_to_dict, get_ai_summary
 from dynamodb_functions import subscribe_user
 
 # Configure logging
@@ -108,7 +106,8 @@ def load_all_applications():
 
         # Ensure required columns exist
         required_cols = ["uid", "address", "app_type",
-                         "app_state", "location_x", "location_y", "start_date", "area"]
+                         "app_state", "location_x", "location_y",
+                         "start_date", "area", "summary"]
         missing_cols = [col for col in required_cols if col not in df.columns]
         if missing_cols:
             logger.warning(f"Missing columns in DataFrame: {missing_cols}")
@@ -426,7 +425,7 @@ def setup_sidebar_filters(df):
 
 # ==================== FOLIUM MAP BUILDER ====================
 
-def build_folium_map(df, heritage_sites, conservation_areas, filters, documents, postcode_coords=None):
+def build_folium_map(df, heritage_sites, conservation_areas, filters, postcode_coords=None):
     """Build the folium map with all layers and features."""
 
     if df.empty:
@@ -504,9 +503,6 @@ def build_folium_map(df, heritage_sites, conservation_areas, filters, documents,
 
     # ==================== PLANNING APPLICATIONS LAYER ====================
 
-    # Create boto3 session to read documents
-    session = create_boto3_session()
-
     if filters["show_clustering"]:
         # Use marker clustering for dense point data
         marker_cluster = MarkerCluster(
@@ -515,8 +511,7 @@ def build_folium_map(df, heritage_sites, conservation_areas, filters, documents,
         for idx, row in df.iterrows():
             # Load AI summary for the current planning application
             data = dict(row)
-            # ai_summary = get_ai_summary(session, data, documents)
-            ai_summary = "Not Available"
+            ai_summary = data.get("summary", "Summary Not Available")
 
             app_type = str(row.get("app_type", "Unknown"))
             color = map_app_type_to_folium_color(app_type)
@@ -741,7 +736,7 @@ def get_status_badge(status: str) -> str:
     return STATUS_BADGE_MAP.get(status, "• Unknown")
 
 
-def build_application_card_html(app_info: dict, summary_html: str = None) -> str:
+def build_summary_card_html(app_info: dict) -> str:
     """Build an HTML card for displaying application details."""
     uid = app_info.get("uid", "N/A")
     address = app_info.get("address", "N/A")
@@ -750,6 +745,7 @@ def build_application_card_html(app_info: dict, summary_html: str = None) -> str
     area = app_info.get("area", "N/A")
     # Use "status" instead of "app_state" since convert_info_to_dict lowercases keys from popup
     status = app_info.get("status", app_info.get("app_state", "N/A"))
+    summary = app_info.get("summary", "No Summary Available")
 
     status_color = get_status_color(status)
     status_badge = get_status_badge(status)
@@ -761,10 +757,10 @@ def build_application_card_html(app_info: dict, summary_html: str = None) -> str
     app_type = app_type.replace("&", "&amp;").replace(
         "<", "&lt;").replace(">", "&gt;")
     area = area.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    summary = summary.replace("&", "&amp;").replace(
+        "<", "&lt;").replace(">", "&gt;")
 
-    summary_section = ""
-    if summary_html:
-        summary_section = f'<div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #2d5a35;"><div style="font-size: 13px; font-weight: 600; color: {THEME_TEXT}; margin-bottom: 8px;">📋 AI Summary</div><div style="font-size: 13px; line-height: 1.5; color: {THEME_TEXT};">{summary_html}</div></div>'
+    summary_section = f'<div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #2d5a35;"><div style="font-size: 13px; font-weight: 600; color: {THEME_TEXT}; margin-bottom: 8px;">📋 AI Summary</div><div style="font-size: 13px; line-height: 1.5; color: {THEME_TEXT};">{summary}</div></div>'
 
     card_html = f'<div style="border: 1px solid #2d5a35; border-left: 4px solid {status_color}; border-radius: 8px; padding: 16px; background-color: {THEME_BG_SECONDARY}; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif;"><div style="margin-bottom: 12px;"><div style="font-size: 16px; font-weight: 700; color: {THEME_TEXT}; word-break: break-word;">{uid}</div><div style="font-size: 12px; font-weight: 500; color: {status_color}; margin-top: 4px;">{status_badge}</div></div><div style="height: 1px; background-color: #2d5a35; margin: 12px 0;"></div><div style="margin-bottom: 8px;"><div style="margin-bottom: 10px;"><div style="font-size: 12px; font-weight: 500; color: {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Address</div><div style="font-size: 13px; color: {THEME_TEXT}; word-break: break-word;">{address}</div></div><div style="margin-bottom: 10px;"><div style="font-size: 12px; font-weight: 500; color: {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Type</div><div style="font-size: 13px; color: {THEME_TEXT};">{app_type}</div></div><div><div style="font-size: 12px; font-weight: 500; color: {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Council</div><div style="font-size: 13px; color: {THEME_TEXT};">{area}</div></div></div>{summary_section}</div>'
 
@@ -778,13 +774,35 @@ def build_empty_card_html() -> str:
 
 # ==================== GET AI SUMMARY OF LATEST CLICKED APPLICATION ====================
 
+def convert_info_to_dict(info_string: str) -> dict:
+    """Convert application info string to dictionary, ignoring the last line."""
+    lines = info_string.strip().split('\n')
 
-def get_latest_application_summary(session: boto3.Session, map_data: dict, documents: dict) -> str:
+    # Remove the last line (View on Council Website link)
+    lines = lines[:-1]
+
+    result = {}
+    for line in lines:
+        if ':' in line:
+            key, value = line.split(':', 1)
+            key = key.strip().lower()
+            value = value.strip()
+            result[key] = value
+
+    return result
+
+
+def get_latest_application_summary(map_data: dict, df: pd.DataFrame) -> str:
     latest_app_info = map_data.get(
         "last_object_clicked_popup") if map_data else None
 
     if latest_app_info and "UID" in latest_app_info:
         latest_app_info = convert_info_to_dict(latest_app_info)
+        uid = latest_app_info.get("uid")
+        if uid:
+            app_data = df[df["uid"] == uid].to_dict(orient="records")[0]
+        else:
+            app_data = latest_app_info
 
         # Show placeholder while generating summary
         summary_placeholder = st.empty()
@@ -793,19 +811,67 @@ def get_latest_application_summary(session: boto3.Session, map_data: dict, docum
 
         # Generate AI summary
         with st.spinner("Generating summary..."):
-            summary_text = get_ai_summary(session, latest_app_info, documents)
-
-        # Build and display card with summary
-        if summary_text:
-            card_html = build_application_card_html(
-                latest_app_info, summary_text)
-        else:
-            card_html = build_application_card_html(latest_app_info)
+            card_html = build_summary_card_html(
+                app_data)
 
         summary_placeholder.markdown(card_html, unsafe_allow_html=True)
     else:
         # Show empty state card
         st.markdown(build_empty_card_html(), unsafe_allow_html=True)
+
+# ==================== PRESENT FILTERED APPLICATION CARDS ====================
+
+
+def create_application_card(app: dict) -> str:
+    """Build an HTML card for displaying application details."""
+    uid = app.get("uid", "N/A")
+    address = app.get("address", "N/A")
+    # Use "type" instead of "app_type" since convert_info_to_dict lowercases keys from popup
+    app_type = app.get("type", app.get("app_type", "N/A"))
+    area = app.get("area", "N/A")
+    # Use "status" instead of "app_state" since convert_info_to_dict lowercases keys from popup
+    status = app.get("status", app.get("app_state", "N/A"))
+
+    status_color = get_status_color(status)
+    status_badge = get_status_badge(status)
+
+    # Escape any HTML characters in text fields
+    uid = uid.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    address = address.replace("&", "&amp;").replace(
+        "<", "&lt;").replace(">", "&gt;")
+    app_type = app_type.replace("&", "&amp;").replace(
+        "<", "&lt;").replace(">", "&gt;")
+    area = area.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    card_html = f'<div style="border: 1px solid #2d5a35; border-left: 4px solid {status_color}; border-radius: 0px; padding: 16px; background-color: {THEME_BG_SECONDARY}; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif; min-height: 350px; display: flex; flex-direction: column;"><div style="margin-bottom: 12px;"><div style="font-size: 16px; font-weight: 700; color: {THEME_TEXT}; word-break: break-word;">{uid}</div><div style="font-size: 12px; font-weight: 500; color: {status_color}; margin-top: 4px;">{status_badge}</div></div><div style="height: 1px; background-color: #2d5a35; margin: 12px 0;"></div><div style="margin-bottom: 8px; flex: 1;"><div style="margin-bottom: 10px;"><div style="font-size: 12px; font-weight: 500; color: {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Address</div><div style="font-size: 13px; color: {THEME_TEXT}; word-break: break-word;">{address}</div></div><div style="margin-bottom: 10px;"><div style="font-size: 12px; font-weight: 500; color: {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Type</div><div style="font-size: 13px; color: {THEME_TEXT};">{app_type}</div></div><div><div style="font-size: 12px; font-weight: 500; color: {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Council</div><div style="font-size: 13px; color: {THEME_TEXT};">{area}</div></div>'
+
+    return card_html
+
+
+# def display_filtered_applications(df: pd.DataFrame, original_count: int):
+#     """Display filtered applications with integrated buttons. Returns focused coordinates if a button is clicked."""
+#     focused_coords = None
+
+#     if not df.empty:
+#         display_cols = ["uid", "address", "app_type",
+#                         "app_state", "area", "start_date", "location_y", "location_x"]
+#         display_df = df[display_cols].copy()
+
+#         # Create 3-column layout
+#         col = 0
+#         cols = st.columns(3, gap="medium")
+#         for row, data in display_df.iterrows():
+#             with cols[col]:
+#                 result = display_card_with_button(data)
+#                 if result:
+#                     focused_coords = result
+#             col = (col + 1) % 3
+#         st.info(
+#             f"✅ Showing {len(df)} of {original_count} total applications")
+#     else:
+#         st.info("No applications to display with current filters.")
+
+#     return focused_coords
 
 
 # ==================== MAIN APPLICATION ====================
@@ -864,8 +930,6 @@ def main():
     # Build and display map
     st.subheader("📍 Planning Applications Map")
 
-    session = create_boto3_session()
-    documents = load_documents(session)
     if df_filtered.empty:
         st.warning(
             "⚠️ No applications match your filters. Try adjusting your selection.")
@@ -877,7 +941,7 @@ def main():
         with col_map:
             with st.spinner("🗺️ Building map..."):
                 m = build_folium_map(df_filtered, heritage_sites,
-                                     conservation_areas, filters, documents, postcode_coords)
+                                     conservation_areas, filters, postcode_coords)
 
             if m:
                 map_data = st_folium(m, width=670, height=700, returned_objects=[
@@ -885,29 +949,14 @@ def main():
 
         with col_summary:
             # Display summary for the latest clicked application on the map
-            get_latest_application_summary(session, map_data, documents)
+            get_latest_application_summary(map_data, df_filtered)
 
     # Display results table
     st.subheader("📋 Filtered Results")
 
-    if not df_filtered.empty:
-        display_cols = ["uid", "address", "app_type",
-                        "app_state", "area", "start_date"]
-        display_df = df_filtered[display_cols].copy()
-        display_df = display_df.rename(columns={
-            "uid": "UID",
-            "address": "Address",
-            "app_type": "Type",
-            "app_state": "Status",
-            "area": "Area",
-            "start_date": "Date Received"
-        })
-
-        st.dataframe(display_df, width="stretch", hide_index=True)
-        st.info(
-            f"✅ Showing {len(df_filtered)} of {len(df_all)} total applications")
-    else:
-        st.info("No applications to display with current filters.")
+    # application_no = len(df_all)
+    # focused_coords = display_filtered_applications(
+    #     df_filtered, application_no)
 
 
 if __name__ == "__main__":
