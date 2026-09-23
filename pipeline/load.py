@@ -25,10 +25,20 @@ from botocore.exceptions import ClientError
 # Import pipeline modules for orchestration
 try:
     from extract import extract_all_areas
-    from transform import transform_dataframes
+    from transform import (
+        transform_dataframes,
+        get_boto3_session,
+        get_openai_client,
+        generate_record_summary,
+    )
+    import transform as transform_module
 except ImportError:
     extract_all_areas = None
     transform_dataframes = None
+    transform_module = None
+    get_boto3_session = None
+    get_openai_client = None
+    generate_record_summary = None
 
 # Configuration
 DATA_DIR = Path(__file__).parent / "data"
@@ -117,9 +127,39 @@ def csv_row_to_dynamodb_item(row: pd.Series) -> Tuple[Dict[str, Any], Dict[str, 
     return keys, attributes
 
 
+def has_data_changed(existing_item: Dict[str, Any], current_row: Dict[str, Any], uid: str) -> Tuple[bool, List[str]]:
+    """
+    Check if application status (app_state) has changed.
+
+    Only regenerates summaries when the decision status changes, since that's the 
+    most significant change to a planning application (e.g., Undecided → Permitted).
+
+    Returns:
+        (has_changed: bool, changed_fields: List[str])
+    """
+    current_app_state = str(current_row.get("app_state", ""))
+    existing_app_state = str(existing_item.get("app_state", ""))
+
+    has_changed = current_app_state != existing_app_state
+    changed_fields = []
+
+    if has_changed:
+        changed_fields.append(
+            f"app_state: '{existing_app_state}' → '{current_app_state}'")
+
+    return has_changed, changed_fields
+
+
 def load_dataframe(table, df: pd.DataFrame, area_name: str, no_db: bool = False) -> Tuple[int, int, int]:
     """
-    Load a single DataFrame into DynamoDB.
+    Load a single DataFrame into DynamoDB with conditional summary generation.
+
+    Summaries are generated ONLY for:
+    - New records (not in DynamoDB yet)
+    - Existing records where application data has changed
+
+    Summaries are REUSED for:
+    - Existing records with no data changes
 
     Returns: (created_count, updated_count, failed_count)
     """
@@ -129,9 +169,25 @@ def load_dataframe(table, df: pd.DataFrame, area_name: str, no_db: bool = False)
 
     logger.info(f"Loading {len(df)} records from {area_name}")
 
+    # Initialize boto3 and OpenAI clients for conditional summary generation
+    session = None
+    openai_client = None
+    try:
+        if get_boto3_session is not None:
+            session = get_boto3_session()
+        if get_openai_client is not None:
+            openai_client = get_openai_client()
+    except Exception as e:
+        logger.warning(
+            f"Could not initialize AWS/OpenAI clients for summary generation: {e}")
+        session = None
+        openai_client = None
+
     created_count = 0
     updated_count = 0
     failed_count = 0
+    summary_generated_count = 0
+    summary_reused_count = 0
 
     for idx, row in df.iterrows():
         keys, attributes = csv_row_to_dynamodb_item(row)
@@ -143,10 +199,60 @@ def load_dataframe(table, df: pd.DataFrame, area_name: str, no_db: bool = False)
             continue
 
         try:
+            uid = keys.get(SORT_KEY, "unknown")
+
             if not no_db:
                 # Check if record already exists
                 existing = table.get_item(Key=keys)
                 is_update = "Item" in existing
+                existing_item = existing.get("Item", {})
+
+                if is_update:
+                    # Existing record - check if data has changed
+                    has_changed, changed_fields = has_data_changed(
+                        existing_item, row.to_dict(), uid)
+
+                    if not has_changed:
+                        # No data changes - reuse existing summary
+                        existing_summary = existing_item.get("summary", "")
+                        if existing_summary:
+                            attributes["summary"] = existing_summary
+                            summary_reused_count += 1
+                            logger.info(
+                                f"  ✓ {uid} (no changes, reusing existing summary)")
+                        else:
+                            # No previous summary, keep current value
+                            logger.info(
+                                f"  ✓ {uid} (no changes, no previous summary)")
+                    else:
+                        # Data has changed - generate new summary if we have clients
+                        logger.info(f"  ✓ {uid} (changes detected)")
+                        for change in changed_fields:
+                            logger.info(f"      • {change}")
+
+                        if session and openai_client and "summary" in attributes:
+                            logger.info(f"      Generating new summary...")
+                            new_summary = generate_record_summary(
+                                session, openai_client, row)
+                            if new_summary:
+                                attributes["summary"] = new_summary
+                                summary_generated_count += 1
+                            logger.info(
+                                f"      Summary: {new_summary[:80]}...")
+                else:
+                    # New record - generate summary if we have clients
+                    if session and openai_client and "summary" in attributes:
+                        logger.info(f"  ✓ {uid} (new record)")
+                        logger.info(f"      Generating summary...")
+                        new_summary = generate_record_summary(
+                            session, openai_client, row)
+                        if new_summary:
+                            attributes["summary"] = new_summary
+                            summary_generated_count += 1
+                        logger.info(f"      Summary: {new_summary[:80]}...")
+                    else:
+                        logger.info(
+                            f"  ✓ {uid} (new record, no summary generation)")
 
                 # Build update expression to set all attributes
                 update_parts = []
@@ -177,12 +283,9 @@ def load_dataframe(table, df: pd.DataFrame, area_name: str, no_db: bool = False)
                     )
 
                 # Track whether it was a create or update
-                uid = keys.get(SORT_KEY, "unknown")
                 if is_update:
-                    logger.info(f"  Updating {uid}")
                     updated_count += 1
                 else:
-                    logger.info(f"  Creating {uid}")
                     created_count += 1
         except ClientError as e:
             logger.error(f"Failed to load row {idx + 1}: {e}")
@@ -190,6 +293,9 @@ def load_dataframe(table, df: pd.DataFrame, area_name: str, no_db: bool = False)
 
     logger.info(
         f"  {area_name}: {created_count} created, {updated_count} updated, {failed_count} failed")
+    if summary_generated_count > 0 or summary_reused_count > 0:
+        logger.info(
+            f"  Summaries: {summary_generated_count} generated, {summary_reused_count} reused")
     return created_count, updated_count, failed_count
 
 
@@ -411,7 +517,7 @@ def main_from_dataframes(dfs_dict: Dict[str, pd.DataFrame], no_db: bool = False)
 
 
 def run_full_pipeline(start_date: str = None, end_date: str = None, no_db: bool = False,
-                      local: bool = False, save_pdf: bool = False) -> Tuple[int, int, int]:
+                      local: bool = False, save_pdf: bool = False, skip_summary: bool = False) -> Tuple[int, int, int]:
     """Run the complete ETL pipeline: extract → transform → load.
 
     This orchestration function calls all three pipeline stages in sequence.
@@ -422,6 +528,7 @@ def run_full_pipeline(start_date: str = None, end_date: str = None, no_db: bool 
         no_db: If True, simulate DynamoDB writes without updating
         local: If True, use local disk mode (no AWS credentials needed)
         save_pdf: If True, save/upload PDFs during extraction
+        skip_summary: If True, skip AI summary generation (useful for local testing)
 
     Returns:
         (total_created, total_updated, total_failed) - counts from DynamoDB load stage
@@ -440,6 +547,12 @@ def run_full_pipeline(start_date: str = None, end_date: str = None, no_db: bool 
         extract_module.USE_S3 = False
         logger.info("Running in LOCAL mode - PDFs will be saved to local disk")
 
+    # Set SKIP_SUMMARY flag in transform module if requested
+    if skip_summary and transform_module:
+        transform_module.SKIP_SUMMARY = True
+        logger.info(
+            "Running with SKIP_SUMMARY=True - AI summaries will be skipped")
+
     try:
         # Stage 1: Extract from API → DataFrame dict
         logger.info("\n" + "="*60)
@@ -454,7 +567,7 @@ def run_full_pipeline(start_date: str = None, end_date: str = None, no_db: bool 
         # Stage 2: Transform → Validate & Standardize
         logger.info("\n" + "="*60)
         logger.info(
-            "STAGE 2: TRANSFORMATION (Validate → Standardize → Typecast)")
+            "STAGE 2: TRANSFORMATION (Validate → Standardize → Typecast → Generate Summaries)")
         logger.info("="*60)
         transformed_dfs, reports = transform_dataframes(dfs)
         logger.info(f"✓ Transformed {len(transformed_dfs)} area datasets")
@@ -572,7 +685,8 @@ def lambda_handler(event, context):
             end_date=end_date,
             no_db=no_db,
             local=False,  # Lambda always uses AWS resources
-            save_pdf=save_pdf
+            save_pdf=save_pdf,
+            skip_summary=False  # Lambda uses full pipeline with summaries
         )
 
         execution_time = time.time() - start_time
@@ -643,6 +757,8 @@ Examples:
                         help="Download and upload PDFs during extraction. Only used with --pipeline")
     parser.add_argument("--local", action="store_true",
                         help="Run in local mode (no AWS credentials needed). Only used with --pipeline")
+    parser.add_argument("--skip-summary", action="store_true",
+                        help="Skip AI summary generation (useful for local testing without OpenAI/AWS credentials)")
     parser.add_argument("--no-db", action="store_true",
                         help="Simulate loading without writing to DynamoDB")
 
@@ -653,6 +769,7 @@ Examples:
                           end_date=args.end_date,
                           no_db=args.no_db,
                           local=args.local,
-                          save_pdf=args.save_pdf)
+                          save_pdf=args.save_pdf,
+                          skip_summary=args.skip_summary)
     else:
         main(no_db=args.no_db)
