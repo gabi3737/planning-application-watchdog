@@ -1449,8 +1449,10 @@ def main():
                 if m:
                     logger.info(
                         f"🎯 [MAIN] Map build successful, rendering with st_folium()")
+
                     map_data = st_folium(m, width=None, height=700, returned_objects=[
                         "last_object_clicked_popup"])
+                    print(map_data)
                     logger.debug(
                         f"[MAIN] st_folium returned, map_data type: {type(map_data)}")
                 else:
