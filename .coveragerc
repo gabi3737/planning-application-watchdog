@@ -9,3 +9,4 @@ omit =
     pipeline/conftest.py
     notification/test_notification.py
     dashboard/dashboard_v2.py
+    dashboard/test_dynamodb_functions.py
