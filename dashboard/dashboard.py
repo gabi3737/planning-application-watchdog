@@ -1203,8 +1203,16 @@ def main():
 
             map_data = None
             with col_map:
+                df_map_filtered = df_filtered.copy()
+                try:
+                    df_map_filtered = df_map_filtered[(df_map_filtered["location_x"] != 0) & (
+                        df_map_filtered["location_y"] != 0)]
+                except KeyError:
+                    st.warning("Location columns not found in the data.")
+                df_map_filtered = df_map_filtered[(df_map_filtered["location_x"] != 0) & (
+                    df_map_filtered["location_y"] != 0)]
                 with st.spinner("🗺️ Building map..."):
-                    m = build_folium_map(df_filtered, heritage_sites,
+                    m = build_folium_map(df_map_filtered, heritage_sites,
                                          conservation_areas, filters, postcode_coords)
 
                 if m:
@@ -1213,12 +1221,12 @@ def main():
 
             with col_summary:
                 # Display summary for the latest clicked application on the map
-                get_latest_application_summary(map_data, df_filtered)
+                get_latest_application_summary(map_data, df_map_filtered)
 
         # Display results as cards
         st.subheader("📋 Filtered Results")
 
-        display_filtered_applications(df_filtered, len(df_all))
+        display_filtered_applications(df_map_filtered, len(df_all))
 
     with tab_workspace:
         st.subheader("📊 Visual Insights")
