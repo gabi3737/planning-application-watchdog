@@ -434,18 +434,20 @@ def build_folium_map(df, heritage_sites, conservation_areas, filters, postcode_c
             "⚠️ No planning applications to display. Please adjust your filters.")
         return None
 
-    # Determine map center
+    # Determine map center and zoom
+    zoom_level = 13  # Default zoom
     # Check if a focused location has been set via button click
     if 'focused_location' in st.session_state and st.session_state.focused_location:
         center_lat = st.session_state.focused_location['lat']
         center_lon = st.session_state.focused_location['lon']
+        zoom_level = st.session_state.focused_location.get('zoom', 16)
         logger.info(
             f"Map focused on application {st.session_state.focused_location.get('uid', 'Unknown')}")
-        del st.session_state.focused_location
     elif postcode_coords and 'latitude' in postcode_coords and 'longitude' in postcode_coords:
         # Use postcode coordinates as center
         center_lat = postcode_coords['latitude']
         center_lon = postcode_coords['longitude']
+        zoom_level = 14
         logger.info(
             f"Map centered on postcode {postcode_coords.get('postcode', 'Unknown')}")
     else:
@@ -478,7 +480,7 @@ def build_folium_map(df, heritage_sites, conservation_areas, filters, postcode_c
     # Create base map
     m = folium.Map(
         location=[center_lat, center_lon],
-        zoom_start=13,
+        zoom_start=zoom_level,
         tiles="OpenStreetMap"
     )
 
@@ -856,26 +858,26 @@ def create_application_card(app: dict) -> str:
 
     card_html = f"""<div style="border: 1px solid #2d5a35; border-left: 4px solid {status_color};
      border-radius: 0px; padding: 16px; background-color: {THEME_BG_SECONDARY};
-     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); font-family: -apple-system, 
-     BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif; min-height: 350px; 
+     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); font-family: -apple-system,
+     BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif; min-height: 400px;
      display: flex; flex-direction: column;"><div style="margin-bottom: 12px;">
-     <div style="font-size: 16px; font-weight: 700; color: {THEME_TEXT}; word-break: 
-     break-word;">{uid}</div><div style="font-size: 12px; font-weight: 500; 
-     color: {status_color}; margin-top: 4px;">{status_badge}</div></div><div style="height: 
-     1px; background-color: #2d5a35; margin: 12px 0;"></div><div style="margin-bottom: 8px; 
-     flex: 1;"><div style="margin-bottom: 10px;"><div style="font-size: 12px; font-weight: 
+     <div style="font-size: 16px; font-weight: 700; color: {THEME_TEXT}; word-break:
+     break-word;">{uid}</div><div style="font-size: 12px; font-weight: 500;
+     color: {status_color}; margin-top: 4px;">{status_badge}</div></div><div style="height:
+     1px; background-color: #2d5a35; margin: 12px 0;"></div><div style="margin-bottom: 8px;
+     flex: 1;"><div style="margin-bottom: 10px;"><div style="font-size: 12px; font-weight:
      500; color: {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">
      Address</div><div style="font-size: 13px; color: {THEME_TEXT}; word-break: break-word;">
      {address}</div></div><div style="margin-bottom: 10px;"><div style="font-size: 12px;
-     font-weight: 500; color: {THEME_TEXT_MUTED}; text-transform: uppercase; 
+     font-weight: 500; color: {THEME_TEXT_MUTED}; text-transform: uppercase;
      letter-spacing: 0.5px;">Type</div><div style="font-size: 13px; color: {THEME_TEXT};">
-     {app_type}</div></div><div><div style="font-size: 12px; font-weight: 500; color: 
+     {app_type}</div></div><div><div style="font-size: 12px; font-weight: 500; color:
      {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Council
      </div><div style="font-size: 13px; color: {THEME_TEXT};">{area}</div></div></div>
      <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #2d5a35;">
-     <details style="cursor: pointer;"><summary style="font-size: 12px; font-weight: 600; 
+     <details style="cursor: pointer;"><summary style="font-size: 12px; font-weight: 600;
      color: {THEME_TEXT}; padding: 4px; user-select: none;">📋 Summary</summary>
-     <div style="font-size: 13px; line-height: 1.5; color: {THEME_TEXT}; margin-top: 8px; 
+     <div style="font-size: 13px; line-height: 1.5; color: {THEME_TEXT}; margin-top: 8px;
      padding: 8px; background-color: #0d1f12; border-radius: 0px;">{summary}</div></details></div></div>"""
 
     return card_html
@@ -886,41 +888,97 @@ def update_session_location(lat, lon, uid=None):
     st.session_state.focused_location = {
         'lat': lat,
         'lon': lon,
-        'uid': uid or 'N/A'
+        'uid': uid or 'N/A',
+        'zoom': 16
     }
 
 
 def display_filtered_applications(df: pd.DataFrame, original_count: int):
-    """Display filtered applications with integrated buttons. Returns focused coordinates if a button is clicked."""
-    focused_coords = None
-
+    """Display filtered applications with pagination (10 cards per page)."""
     if not df.empty:
         display_cols = ["uid", "address", "app_type",
                         "app_state", "area", "start_date",
                         "location_y", "location_x", "summary"]
         display_df = df[display_cols].copy()
 
-        # Create 3-column layout
+        # Pagination setup
+        cards_per_page = 9
+        total_cards = len(display_df)
+        total_pages = (total_cards + cards_per_page - 1) // cards_per_page
+
+        # Initialize pagination state
+        if "current_page" not in st.session_state:
+            st.session_state.current_page = 0
+
+        # Pagination buttons (Previous and Next only)
+        col1, col2, col3 = st.columns([1, 1, 1], gap="large")
+        with col1:
+            if st.button("<- Previous Page", disabled=(st.session_state.current_page == 0), use_container_width=True):
+                st.session_state.current_page -= 1
+                st.rerun()
+
+        with col3:
+            if st.button("Next Page ->", disabled=(st.session_state.current_page >= total_pages - 1), use_container_width=True):
+                st.session_state.current_page += 1
+                st.rerun()
+
+        # Calculate slice indices
+        start_id = st.session_state.current_page * cards_per_page
+        end_id = start_id + cards_per_page
+        page_df = display_df.iloc[start_id:end_id]
+
+        # Summary info
+        cards_shown = len(page_df)
+        st.info(
+            f"✅ Showing {start_id + 1}-{start_id + cards_shown} of {original_count} total applications")
+
+        # Display page number above cards
+        st.markdown(
+            f"<div style='text-align: center; margin: 16px 0;'><p style='font-size: 14px; font-weight: 600; color: #a3d8a3;'>Page {st.session_state.current_page + 1} of {total_pages}</p></div>", unsafe_allow_html=True)
+
+        # Display cards in 3-column layout
         col = 0
         cols = st.columns(3, gap="medium")
-        for row, data in display_df.iterrows():
+        for row, data in page_df.iterrows():
             with cols[col]:
                 card = create_application_card(data)
                 st.markdown(card, unsafe_allow_html=True)
+                status = data.get("status", data.get("app_state", "N/A"))
+                status_color = get_status_color(status)
 
-                # Focus Map button with on_click callback
-                # st.button(
-                #     "🗺️ Focus Map",
-                #     key=f"focus_map_{data.get('uid')}",
-                #     use_container_width=True,
-                #     on_click=lambda lat=data.get('location_y'), lon=data.get(
-                #         'location_x'), uid=data.get('uid', 'N/A'): update_session_location(lat, lon, uid)
-                # )
+                st.markdown(f"""
+                <style>
+                button[key="location_{data.get('uid')}"] {{
+                    background: linear-gradient(135deg, {status_color} 0%, {status_color}dd 100%) !important;
+                    color: white !important;
+                    font-weight: 600 !important;
+                    border: 2px solid {status_color} !important;
+                    border-radius: 0px !important;
+                    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
+                    text-transform: uppercase !important;
+                    letter-spacing: 0.5px !important;
+                }}
+                button[key="location_{data.get('uid')}"]:hover {{
+                    background: linear-gradient(135deg, {status_color}dd 0%, {status_color}aa 100%) !important;
+                    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3) !important;
+                }}
+                button[key="location_{data.get('uid')}"]:active {{
+                    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3), inset 0 1px 2px rgba(0, 0, 0, 0.2) !important;
+                }}
+                </style>
+                """, unsafe_allow_html=True)
+
+                # Jump to Location button with on_click callback
+                st.button(
+                    "🗺️ Jump to Location",
+                    key=f"location_{data.get('uid')}",
+                    use_container_width=True,
+                    on_click=lambda lat=data.get('location_y'), lon=data.get(
+                        'location_x'), uid=data.get('uid', 'N/A'): update_session_location(lat, lon, uid)
+                )
 
                 st.space(10)
             col = (col + 1) % 3
-        st.info(
-            f"✅ Showing {len(df)} of {original_count} total applications")
     else:
         st.info("No applications to display with current filters.")
 
@@ -1004,6 +1062,8 @@ def main():
 
     # Display results table
     st.subheader("📋 Filtered Results")
+
+    # Apply custom CSS for rectangular buttons
 
     application_no = len(df_all)
     display_filtered_applications(
