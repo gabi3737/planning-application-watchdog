@@ -974,6 +974,17 @@ def get_status_badge(status: str) -> str:
     return STATUS_BADGE_MAP.get(status, "• Unknown")
 
 
+def format_date_for_display(date_value) -> str:
+    """Format date for display as 'Month DD, YYYY' (e.g., 'Sep 24, 2026')."""
+    if pd.isna(date_value) or date_value is None:
+        return "N/A"
+    try:
+        date_obj = pd.to_datetime(date_value)
+        return date_obj.strftime("%b %d, %Y")
+    except (TypeError, ValueError):
+        return "N/A"
+
+
 def build_summary_card_html(app_info: dict) -> str:
     """Build an HTML card for displaying application details."""
     uid = app_info.get("uid", "N/A")
@@ -983,6 +994,7 @@ def build_summary_card_html(app_info: dict) -> str:
     area = app_info.get("area", "N/A")
     # Use "status" instead of "app_state" since convert_info_to_dict lowercases keys from popup
     status = app_info.get("status", app_info.get("app_state", "N/A"))
+    start_date = format_date_for_display(app_info.get("start_date", "N/A"))
     summary = app_info.get("summary", "No Summary Available")
 
     status_color = get_status_color(status)
@@ -1000,7 +1012,7 @@ def build_summary_card_html(app_info: dict) -> str:
 
     summary_section = f'<div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #2d5a35;"><div style="font-size: 13px; font-weight: 600; color: {THEME_TEXT}; margin-bottom: 8px;">📋 AI Summary</div><div style="font-size: 13px; line-height: 1.5; color: {THEME_TEXT};">{summary}</div></div>'
 
-    card_html = f'<div style="border: 1px solid #2d5a35; border-left: 4px solid {status_color}; border-radius: 8px; padding: 16px; background-color: {THEME_BG_SECONDARY}; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif;"><div style="margin-bottom: 12px;"><div style="font-size: 16px; font-weight: 700; color: {THEME_TEXT}; word-break: break-word;">{uid}</div><div style="font-size: 12px; font-weight: 500; color: {status_color}; margin-top: 4px;">{status_badge}</div></div><div style="height: 1px; background-color: #2d5a35; margin: 12px 0;"></div><div style="margin-bottom: 8px;"><div style="margin-bottom: 10px;"><div style="font-size: 12px; font-weight: 500; color: {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Address</div><div style="font-size: 13px; color: {THEME_TEXT}; word-break: break-word;">{address}</div></div><div style="margin-bottom: 10px;"><div style="font-size: 12px; font-weight: 500; color: {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Type</div><div style="font-size: 13px; color: {THEME_TEXT};">{app_type}</div></div><div><div style="font-size: 12px; font-weight: 500; color: {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Council</div><div style="font-size: 13px; color: {THEME_TEXT};">{area}</div></div></div>{summary_section}</div>'
+    card_html = f'<div style="border: 1px solid #2d5a35; border-left: 4px solid {status_color}; border-radius: 8px; padding: 16px; background-color: {THEME_BG_SECONDARY}; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif;"><div style="margin-bottom: 12px;"><div style="font-size: 16px; font-weight: 700; color: {THEME_TEXT}; word-break: break-word;">{uid}</div><div style="font-size: 12px; font-weight: 500; color: {status_color}; margin-top: 4px;">{status_badge}</div></div><div style="height: 1px; background-color: #2d5a35; margin: 12px 0;"></div><div style="margin-bottom: 8px;"><div style="margin-bottom: 10px;"><div style="font-size: 12px; font-weight: 500; color: {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Address</div><div style="font-size: 13px; color: {THEME_TEXT}; word-break: break-word;">{address}</div></div><div style="margin-bottom: 10px;"><div style="font-size: 12px; font-weight: 500; color: {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Date</div><div style="font-size: 13px; color: {THEME_TEXT};">{start_date}</div></div><div style="margin-bottom: 10px;"><div style="font-size: 12px; font-weight: 500; color: {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Type</div><div style="font-size: 13px; color: {THEME_TEXT};">{app_type}</div></div><div><div style="font-size: 12px; font-weight: 500; color: {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Council</div><div style="font-size: 13px; color: {THEME_TEXT};">{area}</div></div></div>{summary_section}</div>'
 
     return card_html
 
@@ -1067,6 +1079,7 @@ def create_application_card(app: dict) -> str:
     area = app.get("area", "N/A")
     # Use "status" instead of "app_state" since convert_info_to_dict lowercases keys from popup
     status = app.get("status", app.get("app_state", "N/A"))
+    start_date = format_date_for_display(app.get("start_date", "N/A"))
     summary = app.get("summary", "No Summary Available")
 
     status_color = get_status_color(status)
@@ -1095,6 +1108,9 @@ def create_application_card(app: dict) -> str:
      500; color: {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">
      Address</div><div style="font-size: 13px; color: {THEME_TEXT}; word-break: break-word;">
      {address}</div></div><div style="margin-bottom: 10px;"><div style="font-size: 12px;
+     font-weight: 500; color: {THEME_TEXT_MUTED}; text-transform: uppercase;
+     letter-spacing: 0.5px;">Date</div><div style="font-size: 13px; color: {THEME_TEXT};">
+     {start_date}</div></div><div style="margin-bottom: 10px;"><div style="font-size: 12px;
      font-weight: 500; color: {THEME_TEXT_MUTED}; text-transform: uppercase;
      letter-spacing: 0.5px;">Type</div><div style="font-size: 13px; color: {THEME_TEXT};">
      {app_type}</div></div><div><div style="font-size: 12px; font-weight: 500; color:
@@ -1127,6 +1143,55 @@ def display_filtered_applications(df: pd.DataFrame, original_count: int):
                         "location_y", "location_x", "summary"]
         display_df = df[display_cols].copy()
 
+        # Initialize sort state
+        if "sort_order" not in st.session_state:
+            st.session_state.sort_order = "Date (Descending - newest first)"
+
+        # Sort control section
+        st.subheader("🔀 Sort Options")
+        sort_col1, sort_col2 = st.columns([2, 1], gap="medium")
+        with sort_col1:
+            new_sort = st.selectbox(
+                "Sort by:",
+                options=[
+                    "Date (Descending - newest first)",
+                    "Date (Ascending - oldest first)",
+                    "UID (A-Z)",
+                    "UID (Z-A)"
+                ],
+                index=[
+                    "Date (Descending - newest first)",
+                    "Date (Ascending - oldest first)",
+                    "UID (A-Z)",
+                    "UID (Z-A)"
+                ].index(st.session_state.sort_order),
+                key="sort_selectbox",
+                help="Choose how to sort the list of applications"
+            )
+
+            # Update sort order if changed
+            if new_sort != st.session_state.sort_order:
+                st.session_state.sort_order = new_sort
+                st.session_state.current_page = 0  # Reset to first page
+                st.rerun()
+
+        # Apply sorting
+        try:
+            if "Date" in st.session_state.sort_order:
+                display_df["start_date"] = pd.to_datetime(display_df["start_date"])
+                if "Descending" in st.session_state.sort_order:
+                    display_df = display_df.sort_values("start_date", ascending=False)
+                else:
+                    display_df = display_df.sort_values("start_date", ascending=True)
+            else:  # Sort by UID
+                if "A-Z" in st.session_state.sort_order:
+                    display_df = display_df.sort_values("uid", ascending=True)
+                else:
+                    display_df = display_df.sort_values("uid", ascending=False)
+            display_df = display_df.reset_index(drop=True)
+        except Exception as e:
+            logger.warning(f"Error applying sort: {e}")
+
         # Pagination setup
         cards_per_page = 9
         total_cards = len(display_df)
@@ -1135,6 +1200,8 @@ def display_filtered_applications(df: pd.DataFrame, original_count: int):
         # Initialize pagination state
         if "current_page" not in st.session_state:
             st.session_state.current_page = 0
+
+        st.divider()
 
         # Pagination buttons (Previous and Next only)
         col1, col2, col3 = st.columns([1, 1, 1], gap="large")

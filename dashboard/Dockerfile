@@ -9,9 +9,9 @@ COPY .streamlit/ .streamlit/
 COPY assets/ assets/
 COPY .env .
 
-COPY dashboard_v2.py .
+COPY dashboard.py .
 COPY data_functions.py .
 COPY ai_summary_functions.py .
 COPY dynamodb_functions.py .
     
-CMD streamlit run dashboard_v2.py
+CMD streamlit run dashboard.py
