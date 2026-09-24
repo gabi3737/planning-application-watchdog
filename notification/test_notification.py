@@ -19,7 +19,7 @@ from notification import (
     create_html_body,
     send_email,
     send_all_emails,
-    lambda_handler,
+    handler,
 )
 
 
@@ -304,7 +304,7 @@ class TestLambdaHandler:
     def test_returns_200_on_success(self, mock_main):
         mock_main.return_value = {"a@example.com": "msg-1"}
 
-        response = lambda_handler({}, None)
+        response = handler({}, None)
 
         assert response["statusCode"] == 200
         assert response["body"]["emails_sent"] == 1
@@ -313,7 +313,7 @@ class TestLambdaHandler:
     def test_returns_500_on_failure(self, mock_main):
         mock_main.side_effect = Exception("boom")
 
-        response = lambda_handler({}, None)
+        response = handler({}, None)
 
         assert response["statusCode"] == 500
         assert "boom" in response["body"]["message"]
