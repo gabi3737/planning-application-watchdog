@@ -6,16 +6,16 @@ Features:
 - Interactive folium map with marker clustering, toggleable layers, and search/filtering
 - Sidebar controls for filtering by area, type, status, date range, and address/UID search
 """
-
+import os
+import logging
+import re
+from datetime import datetime, timedelta
 import streamlit as st
 import altair as alt
 import folium
 from folium.plugins import MarkerCluster
 from streamlit_folium import st_folium
 import pandas as pd
-import logging
-import re
-from datetime import datetime, timedelta
 from data_functions import (
     load_application_data,
     get_sites,
@@ -33,15 +33,27 @@ logging.basicConfig(level=logging.INFO,
                     datefmt="%Y-%m-%d %H:%M:%S")
 logger = logging.getLogger(__name__)
 
+
+PATH = os.path.dirname(os.path.abspath(__file__))
+LOGO_NO_BG = os.path.join(PATH, "assets/TerraNotice_NoBackground.png")
+LOGO_TRANSPARENT = os.path.join(PATH, "assets/TerraNotice_Transparent.png")
+
 # ==================== STREAMLIT PAGE CONFIG ====================
 st.set_page_config(
     page_title="TerraNotice",
-    page_icon="🗺️",
+    page_icon=LOGO_TRANSPARENT,
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-st.title("🗺️ TerraNotice")
+
+def display_title():
+    col_logo, col_title = st.columns([1, 10], gap=0)
+    with col_logo:
+        st.image(LOGO_NO_BG, width=70)
+    with col_title:
+        st.title("TerraNotice")
+
 
 # ==================== UTILITY FUNCTIONS ====================
 
@@ -1202,6 +1214,8 @@ def display_filtered_applications(df: pd.DataFrame, original_count: int):
 def main():
     """Main application flow."""
 
+    display_title()
+
     # Load all data
     with st.spinner("⏳ Loading planning applications..."):
         df_all = load_all_applications()
@@ -1267,8 +1281,16 @@ def main():
 
             map_data = None
             with col_map:
+                df_map_filtered = df_filtered.copy()
+                try:
+                    df_map_filtered = df_map_filtered[(df_map_filtered["location_x"] != 0) & (
+                        df_map_filtered["location_y"] != 0)]
+                except KeyError:
+                    st.warning("Location columns not found in the data.")
+                df_map_filtered = df_map_filtered[(df_map_filtered["location_x"] != 0) & (
+                    df_map_filtered["location_y"] != 0)]
                 with st.spinner("🗺️ Building map..."):
-                    m = build_folium_map(df_filtered, heritage_sites,
+                    m = build_folium_map(df_map_filtered, heritage_sites,
                                          conservation_areas, filters, postcode_coords)
 
                 if m:
@@ -1277,12 +1299,12 @@ def main():
 
             with col_summary:
                 # Display summary for the latest clicked application on the map
-                get_latest_application_summary(map_data, df_filtered)
+                get_latest_application_summary(map_data, df_map_filtered)
 
         # Display results as cards
         st.subheader("📋 Filtered Results")
 
-        display_filtered_applications(df_filtered, len(df_all))
+        display_filtered_applications(df_map_filtered, len(df_all))
 
     with tab_workspace:
         st.subheader("📊 Visual Insights")
