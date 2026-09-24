@@ -1347,7 +1347,7 @@ def main():
                 "⚠️ No applications match your filters. Try adjusting your selection.")
         else:
             # Create two-column layout: map (70%) + summary (30%)
-            col_map, col_summary = st.columns([7, 3], gap="medium")
+            col_map, col_summary = st.columns([7, 3], gap="small")
 
             map_data = None
             with col_map:
@@ -1364,7 +1364,7 @@ def main():
                                          conservation_areas, filters, postcode_coords)
 
                 if m:
-                    map_data = st_folium(m, width=670, height=700, returned_objects=[
+                    map_data = st_folium(m, width=None, height=700, returned_objects=[
                         "last_object_clicked_popup"])
 
             with col_summary:
