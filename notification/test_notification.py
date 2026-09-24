@@ -13,13 +13,13 @@ from notification import (
     get_active_emails,
     load_planning_data,
     group_user_emails,
-    get_yesterday_data,
+    get_recent_data,
     match_users_to_new_applications,
     dataframe_to_html,
     create_html_body,
     send_email,
     send_all_emails,
-    handler,
+    lambda_handler,
 )
 
 
@@ -125,33 +125,36 @@ class TestGroupUserEmails:
             group_user_emails(df)
 
 
-class TestGetYesterdayData:
-    """Tests for get_yesterday_data."""
+class TestGetRecentData:
+    """Tests for get_recent_data."""
 
-    def test_filters_to_yesterday(self):
+    def test_filters_to_today_yesterday_and_day_before(self):
+        today = date.today().strftime("%Y-%m-%d %H:%M:%S")
         yesterday = (date.today() - pd.Timedelta(days=1)
                      ).strftime("%Y-%m-%d %H:%M:%S")
+        day_before_yesterday = (date.today() - pd.Timedelta(days=2)
+                                ).strftime("%Y-%m-%d %H:%M:%S")
         df = pd.DataFrame({
-            "start_date": [yesterday, "2020-01-01 00:00:00"],
-            "area": ["Newham", "Croydon"],
+            "start_date": [today, yesterday, day_before_yesterday, "2020-01-01 00:00:00"],
+            "area": ["Newham", "Greenwich", "Tower Hamlets", "Croydon"],
         })
-        result = get_yesterday_data(df)
+        result = get_recent_data(df)
 
-        assert len(result) == 1
-        assert result.iloc[0]["area"] == "Newham"
+        assert len(result) == 3
+        assert set(result["area"]) == {"Newham", "Greenwich", "Tower Hamlets"}
 
     def test_returns_empty_when_no_match(self):
         df = pd.DataFrame({
             "start_date": ["2020-01-01 00:00:00"],
             "area": ["Croydon"],
         })
-        result = get_yesterday_data(df)
+        result = get_recent_data(df)
         assert result.empty
 
     def test_raises_when_missing_start_date_column(self):
         df = pd.DataFrame({"area": ["Newham"]})
         with pytest.raises(ValueError):
-            get_yesterday_data(df)
+            get_recent_data(df)
 
 
 class TestMatchUsersToNewApplications:
@@ -304,7 +307,7 @@ class TestLambdaHandler:
     def test_returns_200_on_success(self, mock_main):
         mock_main.return_value = {"a@example.com": "msg-1"}
 
-        response = handler({}, None)
+        response = lambda_handler({}, None)
 
         assert response["statusCode"] == 200
         assert response["body"]["emails_sent"] == 1
@@ -313,7 +316,7 @@ class TestLambdaHandler:
     def test_returns_500_on_failure(self, mock_main):
         mock_main.side_effect = Exception("boom")
 
-        response = handler({}, None)
+        response = lambda_handler({}, None)
 
         assert response["statusCode"] == 500
         assert "boom" in response["body"]["message"]

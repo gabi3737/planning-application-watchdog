@@ -109,27 +109,30 @@ def group_user_emails(active_emails_df: pd.DataFrame) -> pd.DataFrame:
     return grouped_emails
 
 
-def get_yesterday_data(planning_data_df: pd.DataFrame) -> pd.DataFrame:
-    """Returns a dataframe of planning data for yesterday."""
+def get_recent_data(planning_data_df: pd.DataFrame) -> pd.DataFrame:
+    """Returns a dataframe of planning data added today, yesterday, or the day before yesterday."""
     if "start_date" not in planning_data_df.columns:
         logging.error("DataFrame must contain 'start_date' column.")
         raise ValueError("DataFrame must contain 'start_date' column.")
 
-    yesterday = (date.today() - pd.Timedelta(days=1)
-                 ).strftime("%Y-%m-%d %H:%M:%S")
-    yesterday_data_df = planning_data_df.loc[planning_data_df["start_date"] == yesterday]
-    logging.info(f"Found {len(yesterday_data_df)} records for yesterday.")
+    recent_dates = {date.today() - pd.Timedelta(days=offset)
+                    for offset in range(3)}
+    start_dates = pd.to_datetime(planning_data_df["start_date"]).dt.date
+    recent_data_df = planning_data_df.loc[start_dates.isin(recent_dates)]
+    logging.info(
+        f"Found {len(recent_data_df)} records for today, yesterday, and the day before yesterday.")
 
-    if yesterday_data_df.empty:
-        logging.warning("No planning data found for yesterday.")
+    if recent_data_df.empty:
+        logging.warning(
+            "No planning data found for today, yesterday, and the day before yesterday.")
 
-    return yesterday_data_df
+    return recent_data_df
 
 
 def match_users_to_new_applications(grouped_emails_df: pd.DataFrame,
-                                    yesterday_data_df: pd.DataFrame) -> dict[str, pd.DataFrame]:
-    """Matches each user's areas of interest to yesterday's new planning applications."""
-    if "area" not in yesterday_data_df.columns:
+                                    recent_data_df: pd.DataFrame) -> dict[str, pd.DataFrame]:
+    """Matches each user's areas of interest to recent new planning applications."""
+    if "area" not in recent_data_df.columns:
         logging.error("DataFrame must contain 'area' column.")
         raise ValueError("DataFrame must contain 'area' column.")
 
@@ -137,7 +140,7 @@ def match_users_to_new_applications(grouped_emails_df: pd.DataFrame,
     for _, row in grouped_emails_df.iterrows():
         email = row["email"]
         areas = row["areas"]
-        matching_applications = yesterday_data_df.loc[yesterday_data_df["area"].isin(
+        matching_applications = recent_data_df.loc[recent_data_df["area"].isin(
             areas)]
         matches[email] = matching_applications
         if not matching_applications.empty:
@@ -216,10 +219,10 @@ def main() -> dict[str, str]:
     grouped_emails_df = group_user_emails(active_users_df)
 
     planning_data_df = load_planning_data(session)
-    yesterday_data_df = get_yesterday_data(planning_data_df)
+    recent_data_df = get_recent_data(planning_data_df)
 
     notifications = match_users_to_new_applications(
-        grouped_emails_df, yesterday_data_df)
+        grouped_emails_df, recent_data_df)
 
     if not notifications:
         logging.info("No new planning applications to notify.")
@@ -227,7 +230,7 @@ def main() -> dict[str, str]:
     return send_all_emails(session, notifications, sender=EMAIL_HOST)
 
 
-def handler(event, context):
+def lambda_handler(event, context):
     """AWS Lambda entry point for the daily notification pipeline."""
     try:
         result = main()
