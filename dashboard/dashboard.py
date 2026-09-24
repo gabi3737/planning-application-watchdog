@@ -6,16 +6,16 @@ Features:
 - Interactive folium map with marker clustering, toggleable layers, and search/filtering
 - Sidebar controls for filtering by area, type, status, date range, and address/UID search
 """
-
+import os
+import logging
+import re
+from datetime import datetime, timedelta
 import streamlit as st
 import altair as alt
 import folium
 from folium.plugins import MarkerCluster
 from streamlit_folium import st_folium
 import pandas as pd
-import logging
-import re
-from datetime import datetime, timedelta
 from data_functions import (
     load_application_data,
     get_sites,
@@ -33,15 +33,27 @@ logging.basicConfig(level=logging.INFO,
                     datefmt="%Y-%m-%d %H:%M:%S")
 logger = logging.getLogger(__name__)
 
+
+PATH = os.path.dirname(os.path.abspath(__file__))
+LOGO_NO_BG = os.path.join(PATH, "assets/TerraNotice_NoBackground.png")
+LOGO_TRANSPARENT = os.path.join(PATH, "assets/TerraNotice_Transparent.png")
+
 # ==================== STREAMLIT PAGE CONFIG ====================
 st.set_page_config(
     page_title="TerraNotice",
-    page_icon="🗺️",
+    page_icon=LOGO_TRANSPARENT,
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-st.title("🗺️ TerraNotice")
+
+def display_title():
+    col_logo, col_title = st.columns([1, 10], gap=0)
+    with col_logo:
+        st.image(LOGO_NO_BG, width=70)
+    with col_title:
+        st.title("TerraNotice")
+
 
 # ==================== UTILITY FUNCTIONS ====================
 
@@ -1137,6 +1149,8 @@ def display_filtered_applications(df: pd.DataFrame, original_count: int):
 
 def main():
     """Main application flow."""
+
+    display_title()
 
     # Load all data
     with st.spinner("⏳ Loading planning applications..."):
