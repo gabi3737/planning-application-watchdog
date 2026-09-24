@@ -131,7 +131,7 @@ def has_data_changed(existing_item: Dict[str, Any], current_row: Dict[str, Any],
     """
     Check if application status (app_state) has changed.
 
-    Only regenerates summaries when the decision status changes, since that's the 
+    Only regenerates summaries when the decision status changes, since that's the
     most significant change to a planning application (e.g., Undecided → Permitted).
 
     Returns:
@@ -150,16 +150,24 @@ def has_data_changed(existing_item: Dict[str, Any], current_row: Dict[str, Any],
     return has_changed, changed_fields
 
 
-def load_dataframe(table, df: pd.DataFrame, area_name: str, no_db: bool = False) -> Tuple[int, int, int]:
+def load_dataframe(table, df: pd.DataFrame, area_name: str, no_db: bool = False, force_summary: bool = False) -> Tuple[int, int, int]:
     """
     Load a single DataFrame into DynamoDB with conditional summary generation.
 
     Summaries are generated ONLY for:
     - New records (not in DynamoDB yet)
     - Existing records where application data has changed
+    - Any record if force_summary=True
 
     Summaries are REUSED for:
-    - Existing records with no data changes
+    - Existing records with no data changes (unless force_summary=True)
+
+    Args:
+        table: DynamoDB table resource
+        df: DataFrame to load
+        area_name: Area name for logging
+        no_db: If True, simulate writes without actually updating DynamoDB
+        force_summary: If True, regenerate summaries for all records regardless of changes
 
     Returns: (created_count, updated_count, failed_count)
     """
@@ -175,11 +183,13 @@ def load_dataframe(table, df: pd.DataFrame, area_name: str, no_db: bool = False)
     try:
         if get_boto3_session is not None:
             session = get_boto3_session()
+            logger.info(f"  ✓ Boto3 session initialized")
         if get_openai_client is not None:
             openai_client = get_openai_client()
+            logger.info(f"  ✓ OpenAI client initialized")
     except Exception as e:
         logger.warning(
-            f"Could not initialize AWS/OpenAI clients for summary generation: {e}")
+            f"⚠️  Could not initialize AWS/OpenAI clients for summary generation: {e}")
         session = None
         openai_client = None
 
@@ -212,8 +222,8 @@ def load_dataframe(table, df: pd.DataFrame, area_name: str, no_db: bool = False)
                     has_changed, changed_fields = has_data_changed(
                         existing_item, row.to_dict(), uid)
 
-                    if not has_changed:
-                        # No data changes - reuse existing summary
+                    if not has_changed and not force_summary:
+                        # No data changes and not forcing summary - reuse existing summary
                         existing_summary = existing_item.get("summary", "")
                         if existing_summary:
                             attributes["summary"] = existing_summary
@@ -225,34 +235,47 @@ def load_dataframe(table, df: pd.DataFrame, area_name: str, no_db: bool = False)
                             logger.info(
                                 f"  ✓ {uid} (no changes, no previous summary)")
                     else:
-                        # Data has changed - generate new summary if we have clients
-                        logger.info(f"  ✓ {uid} (changes detected)")
-                        for change in changed_fields:
-                            logger.info(f"      • {change}")
+                        # Data has changed or force_summary is True - generate new summary if we have clients
+                        if force_summary and not has_changed:
+                            logger.info(f"  ✓ {uid} (force regenerating summary)")
+                        else:
+                            logger.info(f"  ✓ {uid} (changes detected)")
+                            for change in changed_fields:
+                                logger.info(f"      • {change}")
 
                         if session and openai_client and "summary" in attributes:
-                            logger.info(f"      Generating new summary...")
+                            logger.info(f"      🔄 Generating new summary...")
                             new_summary = generate_record_summary(
                                 session, openai_client, row)
                             if new_summary:
                                 attributes["summary"] = new_summary
                                 summary_generated_count += 1
-                            logger.info(
-                                f"      Summary: {new_summary[:80]}...")
+                                logger.info(
+                                    f"      ✅ Summary: {new_summary[:80]}...")
+                            else:
+                                logger.warning(
+                                    f"      ❌ Summary generation returned empty")
+                        else:
+                            logger.warning(
+                                f"      ❌ Cannot generate summary: clients={bool(session and openai_client)}, has_summary_col={'summary' in attributes}")
                 else:
                     # New record - generate summary if we have clients
                     if session and openai_client and "summary" in attributes:
                         logger.info(f"  ✓ {uid} (new record)")
-                        logger.info(f"      Generating summary...")
+                        logger.info(f"      🔄 Generating summary...")
                         new_summary = generate_record_summary(
                             session, openai_client, row)
                         if new_summary:
                             attributes["summary"] = new_summary
                             summary_generated_count += 1
-                        logger.info(f"      Summary: {new_summary[:80]}...")
+                            logger.info(
+                                f"      ✅ Summary: {new_summary[:80]}...")
+                        else:
+                            logger.warning(
+                                f"      ❌ Summary generation returned empty")
                     else:
                         logger.info(
-                            f"  ✓ {uid} (new record, no summary generation)")
+                            f"  ✓ {uid} (new record, no summary generation: clients={bool(session and openai_client)}, has_summary_col={'summary' in attributes})")
 
                 # Build update expression to set all attributes
                 update_parts = []
@@ -299,7 +322,7 @@ def load_dataframe(table, df: pd.DataFrame, area_name: str, no_db: bool = False)
     return created_count, updated_count, failed_count
 
 
-def load_from_dataframes(table, dfs_dict: Dict[str, pd.DataFrame], no_db: bool = False) -> Tuple[int, int, int]:
+def load_from_dataframes(table, dfs_dict: Dict[str, pd.DataFrame], no_db: bool = False, force_summary: bool = False) -> Tuple[int, int, int]:
     """
     Load all DataFrames into DynamoDB.
 
@@ -307,6 +330,7 @@ def load_from_dataframes(table, dfs_dict: Dict[str, pd.DataFrame], no_db: bool =
         table: DynamoDB table resource
         dfs_dict: Dict mapping area_name to transformed DataFrame
         no_db: If True, simulate writes without actually updating DynamoDB
+        force_summary: If True, regenerate summaries for all records regardless of changes
 
     Returns: (total_created, total_updated, total_failed)
     """
@@ -315,7 +339,7 @@ def load_from_dataframes(table, dfs_dict: Dict[str, pd.DataFrame], no_db: bool =
     total_failed = 0
 
     for area_name, df in dfs_dict.items():
-        created, updated, failed = load_dataframe(table, df, area_name, no_db)
+        created, updated, failed = load_dataframe(table, df, area_name, no_db, force_summary)
         total_created += created
         total_updated += updated
         total_failed += failed
@@ -496,12 +520,13 @@ def load_all_files(table, no_db: bool = False) -> Dict[str, Tuple[int, int, int]
     return results
 
 
-def main_from_dataframes(dfs_dict: Dict[str, pd.DataFrame], no_db: bool = False) -> Tuple[int, int, int]:
+def main_from_dataframes(dfs_dict: Dict[str, pd.DataFrame], no_db: bool = False, force_summary: bool = False) -> Tuple[int, int, int]:
     """Load DataFrames into DynamoDB.
 
     Args:
         dfs_dict: Dict mapping area_name to transformed DataFrame
         no_db: If True, simulate writes without actually updating DynamoDB
+        force_summary: If True, regenerate summaries for all records regardless of changes
 
     Returns:
         (total_created, total_updated, total_failed)
@@ -510,14 +535,14 @@ def main_from_dataframes(dfs_dict: Dict[str, pd.DataFrame], no_db: bool = False)
 
     try:
         table = initialize_dynamodb()
-        return load_from_dataframes(table, dfs_dict, no_db)
+        return load_from_dataframes(table, dfs_dict, no_db, force_summary)
     except Exception as e:
         logger.error(f"Failed to load data: {e}")
         raise
 
 
 def run_full_pipeline(start_date: str = None, end_date: str = None, no_db: bool = False,
-                      local: bool = False, save_pdf: bool = False, skip_summary: bool = False) -> Tuple[int, int, int]:
+                      local: bool = False, save_pdf: bool = False, skip_summary: bool = False, force_summary: bool = False) -> Tuple[int, int, int]:
     """Run the complete ETL pipeline: extract → transform → load.
 
     This orchestration function calls all three pipeline stages in sequence.
@@ -529,6 +554,7 @@ def run_full_pipeline(start_date: str = None, end_date: str = None, no_db: bool 
         local: If True, use local disk mode (no AWS credentials needed)
         save_pdf: If True, save/upload PDFs during extraction
         skip_summary: If True, skip AI summary generation (useful for local testing)
+        force_summary: If True, regenerate summaries for all records regardless of changes
 
     Returns:
         (total_created, total_updated, total_failed) - counts from DynamoDB load stage
@@ -579,7 +605,7 @@ def run_full_pipeline(start_date: str = None, end_date: str = None, no_db: bool 
         logger.info("STAGE 3: LOADING (DataFrames → DynamoDB)")
         logger.info("="*60)
         created, updated, failed = main_from_dataframes(
-            transformed_dfs, no_db=no_db)
+            transformed_dfs, no_db=no_db, force_summary=force_summary)
 
         logger.info("\n" + "="*60)
         logger.info("PIPELINE COMPLETE")
@@ -740,6 +766,9 @@ Examples:
   # Full pipeline with custom dates
   python3 load.py --pipeline --start-date 2024-01-01 --end-date 2024-12-31
   
+  # Full pipeline with forced summary regeneration
+  python3 load.py --pipeline --force-summary
+  
   # Full pipeline, local testing mode (no AWS credentials needed)
   python3 load.py --pipeline --local --no-db
   
@@ -759,6 +788,8 @@ Examples:
                         help="Run in local mode (no AWS credentials needed). Only used with --pipeline")
     parser.add_argument("--skip-summary", action="store_true",
                         help="Skip AI summary generation (useful for local testing without OpenAI/AWS credentials)")
+    parser.add_argument("--force-summary", action="store_true",
+                        help="Force regenerate summaries for all records, even if they haven't changed. Only used with --pipeline")
     parser.add_argument("--no-db", action="store_true",
                         help="Simulate loading without writing to DynamoDB")
 
@@ -770,6 +801,7 @@ Examples:
                           no_db=args.no_db,
                           local=args.local,
                           save_pdf=args.save_pdf,
-                          skip_summary=args.skip_summary)
+                          skip_summary=args.skip_summary,
+                          force_summary=args.force_summary)
     else:
         main(no_db=args.no_db)

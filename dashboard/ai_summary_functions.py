@@ -106,13 +106,30 @@ def load_data_by_uid(session: boto3.Session, uid: str) -> dict:
 
 def extract_pdf_text(pdf_bytes: bytes) -> str:
     """Extract text from a PDF file represented as bytes."""
+    logger.info(
+        f"📄 Starting PDF text extraction (PDF size: {len(pdf_bytes)} bytes)")
     extracted = []
-    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-        for page in pdf.pages:
-            text = page.extract_text()
-            if text:
-                extracted.append(text)
-    return "\n".join(extracted)
+    try:
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+            logger.info(f"📖 PDF has {len(pdf.pages)} pages")
+            for page_num, page in enumerate(pdf.pages, 1):
+                text = page.extract_text()
+                if text:
+                    logger.debug(
+                        f"  Page {page_num}: extracted {len(text)} characters")
+                    extracted.append(text)
+                else:
+                    logger.debug(f"  Page {page_num}: no text extracted")
+    except Exception as e:
+        logger.error(f"Error extracting text from PDF: {e}")
+        return ""
+
+    result = "\n".join(extracted)
+    logger.info(
+        f"✅ PDF extraction complete: {len(result)} total characters extracted")
+    if len(result) == 0:
+        logger.warning("⚠️  WARNING: PDF extraction returned empty text!")
+    return result
 
 
 def create_openai_client() -> OpenAI:
@@ -128,9 +145,19 @@ def create_openai_client() -> OpenAI:
 
 def summarise_document(openai_client: OpenAI, document_text: str, application_data: dict = {}) -> str:
     """Summarise the given document content using the OpenAI client."""
+    uid = application_data.get("uid", "unknown")
+    logger.info(f"🤖 [UID: {uid}] Generating summary...")
+    logger.info(
+        f"   PDF Text Status: {'✅ Present' if document_text else '❌ EMPTY'} ({len(document_text)} chars)")
+
     if not document_text:
         logger.error("No document content provided for summarisation.")
         return ""
+
+    if document_text:
+        logger.debug(f"   PDF Text Preview: {document_text[:200]}...")
+    logger.debug(f"   Application Data: {application_data}")
+
     try:
         system_role = """
         You are a precise AI assistant which intakes both general information
@@ -176,6 +203,7 @@ def summarise_document(openai_client: OpenAI, document_text: str, application_da
         PDF File:
         {document_text}
         """
+        logger.debug(f"   Calling OpenAI API...")
         response = openai_client.beta.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
@@ -190,6 +218,7 @@ def summarise_document(openai_client: OpenAI, document_text: str, application_da
             ]
         )
         summary = response.choices[0].message.content
+        logger.info(f"✅ [UID: {uid}] OpenAI Response: {summary}")
         return summary
     except Exception as e:
         logger.error(f"Error summarising document: {e}")
@@ -200,15 +229,21 @@ def summarise_document(openai_client: OpenAI, document_text: str, application_da
 def get_ai_summary(_session: boto3.Session, data: dict, documents: dict) -> str:
     uid = data.get("uid")
     uid = uid.replace("/", "_")
+    logger.info(f"\n📋 Starting summary generation for: {uid}")
+
+    logger.info(f"  Step 1: Finding document in S3...")
     document = find_document_by_uid(_session, documents, uid)
     if document:
-        logger.info(f"Document loaded successfully")
+        logger.info(f"  ✅ Document found: {len(document)} bytes")
+        logger.info(f"  Step 2: Extracting text from PDF...")
         pdf_text = extract_pdf_text(document)
+        logger.info(f"  Step 3: Generating summary with OpenAI...")
         openai_client = create_openai_client()
         summary = summarise_document(openai_client, pdf_text, data)
+        logger.info(f"  ✅ Summary generation complete for {uid}\n")
         return summary
     else:
-        logger.error("Document not found.")
+        logger.error(f"  ❌ Document not found for {uid}.")
         return ""
 
 
