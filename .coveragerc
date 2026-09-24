@@ -1,6 +1,6 @@
 [run]
 omit =
-    dashboard/dashboard.py
+    dashboard/test_dashboard.py
     dashboard/test_data_functions.py
     dashboard/test_ai_summary_functions.py
     pipeline/test_extract.py
@@ -8,3 +8,4 @@ omit =
     pipeline/test_save_documents.py
     pipeline/conftest.py
     notification/test_notification.py
+    dashboard/dashboard_v2.py
