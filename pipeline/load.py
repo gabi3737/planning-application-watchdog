@@ -32,7 +32,9 @@ try:
         generate_record_summary,
     )
     import transform as transform_module
-except ImportError:
+except ImportError as e:
+    logger = logging.getLogger(__name__)
+    logger.error(f"Failed to import pipeline modules: {e}", exc_info=True)
     extract_all_areas = None
     transform_dataframes = None
     transform_module = None
