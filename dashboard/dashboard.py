@@ -322,14 +322,20 @@ def load_heritage_sites():
 def load_conservation_areas_data():
     """Load all conservation areas for the 3-council region (no radius dependency)."""
     try:
+        logger.debug(
+            "🔍 [CONSERV_AREA] Starting to load conservation areas from API...")
         # Use same regional center as heritage sites
         conservation_areas = get_conservation_areas(
-            latitude=51.51, longitude=-0.01, radius=20000)
-        logger.info(f"Loaded {len(conservation_areas)} conservation areas")
+            latitude=51.51, longitude=-0.01, radius=5000)
+        logger.info(
+            f"✅ [CONSERV_AREA] Loaded {len(conservation_areas)} conservation areas")
+        logger.debug(
+            f"[CONSERV_AREA] Conservation areas data loaded from API successfully")
         return conservation_areas
 
     except Exception as err:
-        logger.error(f"Error loading conservation areas: {err}")
+        logger.error(
+            f"❌ [CONSERV_AREA] Error loading conservation areas: {err}")
         return []
 
 
@@ -651,10 +657,31 @@ def setup_sidebar_filters(df):
 
 # ==================== FOLIUM MAP BUILDER ====================
 
+def _conservation_area_style(x):
+    """Style function for conservation area polygons (must be module-level for pickling)."""
+    return {
+        "fillColor": "green",
+        "color": "darkgreen",
+        "weight": 2,
+        "opacity": 0.5,
+        "fillOpacity": 0.2,
+    }
+
+
+@st.cache_data(show_spinner=False, ttl=3600)
 def build_folium_map(df, heritage_sites, conservation_areas, filters, postcode_coords=None):
     """Build the folium map with all layers and features."""
+    import time
+    map_start_time = time.time()
+    logger.info(f"🗺️ [MAP_BUILD] ===== STARTING MAP BUILD =====")
+    logger.info(
+        f"[MAP_BUILD] Input data: {len(df)} applications, {len(conservation_areas)} conservation areas")
+    logger.info(
+        f"[MAP_BUILD] Filters: show_conservation_areas={filters.get('show_conservation_areas')}, show_clustering={filters.get('show_clustering')}")
 
     if df.empty:
+        logger.warning(
+            "⚠️ [MAP_BUILD] Empty dataframe - no applications to display")
         st.warning(
             "⚠️ No planning applications to display. Please adjust your filters.")
         return None
@@ -666,14 +693,14 @@ def build_folium_map(df, heritage_sites, conservation_areas, filters, postcode_c
         center_lon = st.session_state.focused_location['lon']
         zoom_level = st.session_state.focused_location.get('zoom', 16)
         logger.info(
-            f"Map focused on application {st.session_state.focused_location.get('uid', 'Unknown')}")
+            f"📍 [MAP_BUILD] Map FOCUSED on application {st.session_state.focused_location.get('uid', 'Unknown')} (lat={center_lat:.4f}, lon={center_lon:.4f}, zoom={zoom_level})")
     elif postcode_coords and 'latitude' in postcode_coords and 'longitude' in postcode_coords:
         # Use postcode coordinates as center
         center_lat = postcode_coords['latitude']
         center_lon = postcode_coords['longitude']
         zoom_level = 14
         logger.info(
-            f"Map centered on postcode {postcode_coords.get('postcode', 'Unknown')}")
+            f"📍 [MAP_BUILD] Map centered on POSTCODE {postcode_coords.get('postcode', 'Unknown')} (lat={center_lat:.4f}, lon={center_lon:.4f})")
     else:
         # Newham default center
         newham_lat = 51.54
@@ -692,16 +719,22 @@ def build_folium_map(df, heritage_sites, conservation_areas, filters, postcode_c
             if not valid_df.empty:
                 center_lat = valid_df["location_y"].mean()
                 center_lon = valid_df["location_x"].mean()
+                logger.info(
+                    f"📍 [MAP_BUILD] Map centered on CALCULATED CENTER from {len(valid_df)} valid applications (lat={center_lat:.4f}, lon={center_lon:.4f})")
             else:
                 center_lat = newham_lat
                 center_lon = newham_lon
+                logger.info(
+                    f"📍 [MAP_BUILD] No valid application coordinates, using NEWHAM DEFAULT (lat={center_lat:.4f}, lon={center_lon:.4f})")
         except Exception as err:
             logger.warning(
-                f"Error calculating map center: {err}. Defaulting to Newham.")
+                f"⚠️ [MAP_BUILD] Error calculating map center: {err}. Defaulting to Newham.")
             center_lat = newham_lat
             center_lon = newham_lon
 
     # Create base map
+    logger.debug(
+        f"[MAP_BUILD] Creating base folium map at center (lat={center_lat:.4f}, lon={center_lon:.4f}), zoom={zoom_level}")
     m = folium.Map(
         location=[center_lat, center_lon],
         zoom_start=zoom_level,
@@ -737,10 +770,16 @@ def build_folium_map(df, heritage_sites, conservation_areas, filters, postcode_c
 
     # ==================== PLANNING APPLICATIONS LAYER ====================
 
+    logger.info(
+        f"[MAP_BUILD] Starting to add planning applications layer ({len(df)} applications, clustering={filters.get('show_clustering')})")
+    app_layer_start_time = time.time()
+
     # Create boto3 session to read documents
     session = create_boto3_session()
 
     if filters["show_clustering"]:
+        logger.debug(
+            f"[MAP_BUILD] Using CLUSTERED marker mode for planning applications")
         # Use marker clustering for dense point data
         marker_cluster = MarkerCluster(
             name="Planning Applications (Clustered)").add_to(m)
@@ -893,21 +932,33 @@ def build_folium_map(df, heritage_sites, conservation_areas, filters, postcode_c
     # ==================== HERITAGE SITES LAYER ====================
     # Heritage sites are now shown on-demand within planning application popups (within 100m)
 
+    app_layer_elapsed = time.time() - app_layer_start_time
+    logger.info(
+        f"✅ [MAP_BUILD] Finished adding planning applications layer - Time: {app_layer_elapsed:.3f}s")
+
     # ==================== CONSERVATION AREAS LAYER ====================
 
     if filters["show_conservation_areas"] and conservation_areas:
+        logger.info(
+            f"🟢 [MAP_BUILD] ADDING CONSERVATION AREAS LAYER - {len(conservation_areas)} areas to process")
+        conserv_area_start_time = time.time()
         conservation_layer = folium.FeatureGroup(
             name="Conservation Areas", show=True).add_to(m)
+        logger.debug(
+            f"[MAP_BUILD] Conservation areas FeatureGroup created and added to map")
 
-        for area in conservation_areas:
+        conserv_processed = 0
+        conserv_skipped = 0
+        for idx, area in enumerate(conservation_areas):
             try:
                 if "geometry" in area:
                     geometry = area["geometry"]
                     props = area.get("properties", {})
+                    area_name = props.get('NAME', 'Conservation Area')
 
                     popup_text = f"""
                     <div style="font-family: Arial; font-size: 12px;">
-                        <b>{props.get('NAME', 'Conservation Area')}</b>
+                        <b>{area_name}</b>
                     </div>
                     """
 
@@ -918,22 +969,42 @@ def build_folium_map(df, heritage_sites, conservation_areas, filters, postcode_c
                             "geometry": geometry,
                             "properties": props
                         },
-                        style_function=lambda x: {
-                            "fillColor": "green",
-                            "color": "darkgreen",
-                            "weight": 2,
-                            "opacity": 0.5,
-                            "fillOpacity": 0.2,
-                        },
+                        style_function=_conservation_area_style,
                         popup=folium.Popup(popup_text, max_width=250),
-                        tooltip=props.get('NAME', 'Conservation Area'),
+                        tooltip=area_name,
                     ).add_to(conservation_layer)
+                    conserv_processed += 1
+                    if conserv_processed % 5 == 0:
+                        logger.debug(
+                            f"[MAP_BUILD] Processed {conserv_processed} conservation areas so far...")
+                else:
+                    conserv_skipped += 1
+                    logger.debug(
+                        f"[MAP_BUILD] Skipping conservation area {idx} - no geometry found")
             except Exception as err:
-                logger.debug(f"Error processing conservation area: {err}")
+                conserv_skipped += 1
+                logger.debug(
+                    f"⚠️ [MAP_BUILD] Error processing conservation area {idx}: {err}")
                 continue
 
+        conserv_area_elapsed = time.time() - conserv_area_start_time
+        logger.info(
+            f"✅ [MAP_BUILD] FINISHED conservation areas layer - Processed: {conserv_processed}, Skipped: {conserv_skipped}, Time: {conserv_area_elapsed:.3f}s")
+    else:
+        if not filters["show_conservation_areas"]:
+            logger.debug(
+                f"[MAP_BUILD] Conservation areas layer DISABLED by user filter")
+        else:
+            logger.debug(
+                f"[MAP_BUILD] No conservation areas data available (empty list)")
+
     # Add layer control
+    logger.debug(f"[MAP_BUILD] Adding layer control")
     folium.LayerControl(position="topright", collapsed=False).add_to(m)
+
+    map_elapsed = time.time() - map_start_time
+    logger.info(
+        f"✅ [MAP_BUILD] ===== MAP BUILD COMPLETE - Total time: {map_elapsed:.3f}s =====")
 
     return m
 
@@ -1328,8 +1399,12 @@ def main():
 
     # Load auxiliary data (shared across tabs)
     with st.spinner("⏳ Loading heritage sites and conservation areas..."):
+        logger.info(
+            "🔄 [MAIN] Starting to load heritage sites and conservation areas...")
         heritage_sites = load_heritage_sites()
         conservation_areas = load_conservation_areas_data()
+        logger.info(
+            f"✅ [MAIN] Loaded {len(heritage_sites)} heritage sites and {len(conservation_areas)} conservation areas")
 
     # Split the dashboard into a map/overview tab and a scratch tab to work in
     tab_overview, tab_workspace = st.tabs(["🗺️ Overview", "🛠️ Insights"])
@@ -1351,21 +1426,35 @@ def main():
 
             map_data = None
             with col_map:
+                logger.info(
+                    f"🎯 [MAIN] Preparing to build map with {len(df_filtered)} filtered applications")
                 df_map_filtered = df_filtered.copy()
                 try:
                     df_map_filtered = df_map_filtered[(df_map_filtered["location_x"] != 0) & (
                         df_map_filtered["location_y"] != 0)]
                 except KeyError:
+                    logger.warning(
+                        "⚠️ [MAIN] Location columns not found in the data.")
                     st.warning("Location columns not found in the data.")
                 df_map_filtered = df_map_filtered[(df_map_filtered["location_x"] != 0) & (
                     df_map_filtered["location_y"] != 0)]
+                logger.info(
+                    f"🎯 [MAIN] Map will display {len(df_map_filtered)} applications with valid coordinates")
                 with st.spinner("🗺️ Building map..."):
+                    logger.info(
+                        f"🎯 [MAIN] Calling build_folium_map() with conservation_areas={len(conservation_areas)} areas, show_conservation_areas={filters.get('show_conservation_areas')}")
                     m = build_folium_map(df_map_filtered, heritage_sites,
                                          conservation_areas, filters, postcode_coords)
 
                 if m:
+                    logger.info(
+                        f"🎯 [MAIN] Map build successful, rendering with st_folium()")
                     map_data = st_folium(m, width=670, height=700, returned_objects=[
                         "last_object_clicked_popup"])
+                    logger.debug(
+                        f"[MAIN] st_folium returned, map_data type: {type(map_data)}")
+                else:
+                    logger.warning("⚠️ [MAIN] Map build returned None")
 
             with col_summary:
                 # Display summary for the latest clicked application on the map
