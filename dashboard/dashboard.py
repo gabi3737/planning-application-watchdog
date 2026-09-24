@@ -1178,11 +1178,14 @@ def display_filtered_applications(df: pd.DataFrame, original_count: int):
         # Apply sorting
         try:
             if "Date" in st.session_state.sort_order:
-                display_df["start_date"] = pd.to_datetime(display_df["start_date"])
+                display_df["start_date"] = pd.to_datetime(
+                    display_df["start_date"])
                 if "Descending" in st.session_state.sort_order:
-                    display_df = display_df.sort_values("start_date", ascending=False)
+                    display_df = display_df.sort_values(
+                        "start_date", ascending=False)
                 else:
-                    display_df = display_df.sort_values("start_date", ascending=True)
+                    display_df = display_df.sort_values(
+                        "start_date", ascending=True)
             else:  # Sort by UID
                 if "A-Z" in st.session_state.sort_order:
                     display_df = display_df.sort_values("uid", ascending=True)
