@@ -85,17 +85,28 @@ resource "aws_iam_role_policy" "lambda_etl_policy" {
   policy = jsonencode({
     Version = "2012-10-17"
 
-    Statement = [{
-      Effect = "Allow"
+    Statement = [
+      {
+        Effect = "Allow"
 
-      Action = [
-        "s3:GetObject",
-        "s3:PutObject",
-        "s3:DeleteObject",
-        "s3:ListBucket"
-      ]
+        Action = [
+          "s3:ListBucket",
+          "s3:ListObjectsV2",
+          "s3:ListObjects"
+        ]
 
-      Resource = "${aws_s3_bucket.c25_planning_files_bucket.arn}/*"
+        Resource = aws_s3_bucket.c25_planning_files_bucket.arn
+      },
+      {
+        Effect = "Allow"
+
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject"
+        ]
+
+        Resource = "${aws_s3_bucket.c25_planning_files_bucket.arn}/*"
       },
       {
         Effect = "Allow"

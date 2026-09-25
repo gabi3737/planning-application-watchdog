@@ -1422,7 +1422,7 @@ def main():
                 "⚠️ No applications match your filters. Try adjusting your selection.")
         else:
             # Create two-column layout: map (70%) + summary (30%)
-            col_map, col_summary = st.columns([7, 3], gap="medium")
+            col_map, col_summary = st.columns([7, 3], gap="small")
 
             map_data = None
             with col_map:

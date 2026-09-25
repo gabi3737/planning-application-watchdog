@@ -8,7 +8,7 @@ terraform {
   backend "s3" {
     bucket = "c25-planning-terraform-config"
     key    = "state"
-    region = var.aws_region
+    region = "eu-west-2"
     encrypt = true
   }
 }
