@@ -1,3 +1,4 @@
+# pylint: skip-file
 """Pytest fixtures and mock data."""
 
 import pytest

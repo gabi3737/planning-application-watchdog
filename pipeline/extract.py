@@ -4,22 +4,22 @@ Extract planning applications from the PlanIt API and save to CSV.
 Usage:
     python3 extract.py [--start-date YYYY-MM-DD] [--end-date YYYY-MM-DD] [--save-pdf]
 """
-
-import argparse
-import logging
-from curl_cffi import requests
-import pandas as pd
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Tuple, Optional
 from pathlib import Path
 import time
 import os
 from urllib.parse import urljoin
+from io import BytesIO
+
+import argparse
+import logging
+from curl_cffi import requests
+import pandas as pd
 from bs4 import BeautifulSoup
 import certifi
 from requests.exceptions import HTTPError
 import boto3
-from io import BytesIO
 from botocore.exceptions import ClientError
 
 # Configuration
@@ -105,10 +105,10 @@ def load_webpage(url: str, session: requests.Session) -> Optional[BeautifulSoup]
         soup = BeautifulSoup(response.text, "html.parser")
         return soup
     except HTTPError as e:
-        logger.error(f"HTTP error loading webpage {url}: {e}")
+        logger.error("HTTP error loading webpage %s: %s", url, e)
         return None
     except Exception as e:
-        logger.error(f"Error loading webpage {url}: {e}")
+        logger.error("Error loading webpage %s: %s", url, e)
         return None
 
 
@@ -134,7 +134,7 @@ def get_pdf(url: str, session: requests.Session) -> Optional[bytes]:
         response.raise_for_status()
         return response.content
     except Exception as e:
-        logger.error(f"Error downloading PDF from {url}: {e}")
+        logger.error("Error downloading PDF from %s: %s", url, e)
         return None
 
 
@@ -162,10 +162,10 @@ def pdf_exists_in_s3(uid: str) -> bool:
         # Check if any objects were returned
         return response.get("Contents") is not None and len(response.get("Contents", [])) > 0
     except ClientError as e:
-        logger.warning(f"Error checking S3 for {uid}: {e}")
+        logger.warning("Error checking S3 for %s: %s", uid, e)
         return False
     except Exception as e:
-        logger.warning(f"Unexpected error checking S3 for {uid}: {e}")
+        logger.warning("Unexpected error checking S3 for %s: %s", uid, e)
         return False
 
 
@@ -181,10 +181,10 @@ def upload_pdf_to_s3_or_local(content: bytes, uid: str, filename: str) -> bool:
             filepath = uid_folder / safe_filename
             with open(filepath, "wb") as f:
                 f.write(content)
-            logger.debug(f"    Saved PDF to {filepath}")
+            logger.debug("    Saved PDF to %s", filepath)
             return True
         except Exception as e:
-            logger.error(f"    Error saving PDF for {uid}: {e}")
+            logger.error("    Error saving PDF for %s: %s", uid, e)
             return False
 
     # Upload to S3
@@ -199,13 +199,13 @@ def upload_pdf_to_s3_or_local(content: bytes, uid: str, filename: str) -> bool:
             Key=s3_key,
             Body=content
         )
-        logger.debug(f"    Uploaded PDF to s3://{S3_BUCKET}/{s3_key}")
+        logger.debug("    Uploaded PDF to s3://%s/%s", S3_BUCKET, s3_key)
         return True
     except ClientError as e:
-        logger.error(f"    Error uploading PDF for {uid} to S3: {e}")
+        logger.error("    Error uploading PDF for %s to S3: %s", uid, e)
         return False
     except Exception as e:
-        logger.error(f"    Unexpected error uploading PDF for {uid}: {e}")
+        logger.error("    Unexpected error uploading PDF for %s: %s", uid, e)
         return False
 
 
@@ -227,28 +227,28 @@ def download_documents(app_url: str, session: requests.Session, uid: str, force_
     """
     # Check if PDF already exists (skip if found and not forcing re-download)
     if USE_S3 and not force_pdf and pdf_exists_in_s3(uid):
-        logger.info(f"    ✓ PDF already exists for {uid}, skipping extraction")
+        logger.info("    ✓ PDF already exists for %s, skipping extraction", uid)
         return True
 
     if not app_url:
-        logger.debug(f"    No URL provided for {uid}")
+        logger.debug("    No URL provided for %s", uid)
         return False
 
     try:
-        logger.debug(f"    Loading documents page for {uid}")
+        logger.debug("    Loading documents page for %s", uid)
         docs_url = convert_url_to_documents_url(app_url)
         soup = load_webpage(docs_url, session)
         if not soup:
-            logger.warning(f"    Could not load documents page for {uid}")
+            logger.warning("    Could not load documents page for %s", uid)
             return False
 
         # Get all PDF links with their text
         pdf_links = find_pdf_urls(soup, docs_url)
         if not pdf_links:
-            logger.debug(f"    No PDFs found for {uid}")
+            logger.debug("    No PDFs found for %s", uid)
             return False
 
-        logger.debug(f"    Found {len(pdf_links)} PDF links for {uid}")
+        logger.debug("    Found %d PDF links for %s", len(pdf_links), uid)
 
         # Try to find a form PDF
         selected_pdf_url = None
@@ -256,25 +256,24 @@ def download_documents(app_url: str, session: requests.Session, uid: str, force_
 
         for pdf_url, pdf_text in pdf_links:
             logger.debug(
-                f"    ✓ Checking PDF link: URL: {pdf_url}")
+                "    ✓ Checking PDF link: URL: %s", pdf_url)
             if "form" in pdf_url.lower() or "applicationform" in pdf_url.lower():
                 selected_pdf_url = pdf_url
                 selected_pdf_text = pdf_text
-                logger.info(f"    ✓ Found form PDF: {pdf_url}")
+                logger.info("    ✓ Found form PDF: %s", pdf_url)
                 break
 
         # Fall back to first PDF if no form found
         if not selected_pdf_url:
             selected_pdf_url, selected_pdf_text = pdf_links[0]
             logger.info(
-                f"    ✓ No form PDF found, using first: {selected_pdf_text}")
-
+                "    ✓ No form PDF found, using first: %s", selected_pdf_text)
         # Download the selected PDF
-        logger.debug(f"    Downloading {selected_pdf_text}...")
+        logger.debug("    Downloading %s...", selected_pdf_text)
         pdf_content = get_pdf(selected_pdf_url, session)
         if not pdf_content:
             logger.warning(
-                f"    Failed to download {selected_pdf_text} for {uid}")
+                "    Failed to download %s for %s", selected_pdf_text, uid)
             return False
 
         # Extract filename from URL, fallback to generic name
@@ -284,13 +283,13 @@ def download_documents(app_url: str, session: requests.Session, uid: str, force_
 
         # Save to uid-specific folder
         if upload_pdf_to_s3_or_local(pdf_content, uid, filename):
-            logger.info(f"    ✓ Saved application form for {uid}")
+            logger.info("    ✓ Saved application form for %s", uid)
             return True
         else:
             return False
 
     except Exception as e:
-        logger.error(f"    Error downloading documents for {uid}: {e}")
+        logger.error("    Error downloading documents for %s: %s", uid, e)
         return False
 
 
@@ -355,14 +354,15 @@ def fetch_applications(auth_code: int, start_date: str, end_date: str) -> List[D
 
             all_records.extend(records)
             logger.info(
-                f"Auth {auth_code}: Fetched {len(records)} records from page {page}")
+                "Auth %s: Fetched %d records from page %d", auth_code, len(records), page)
             page += 1
 
             # Add delay between requests to avoid rate limiting
             time.sleep(20)
 
         except Exception as e:
-            logger.error(f"Auth {auth_code}: Error fetching page {page}: {e}")
+            logger.error("Auth %s: Error fetching page %d: %s",
+                         auth_code, page, e)
             break
 
     return all_records
@@ -385,7 +385,7 @@ def extract_all_areas(start_date: str = None, end_date: str = None, save_pdf: bo
     if not start_date or not end_date:
         start_date, end_date = calculate_date_range()
 
-    logger.info(f"Extracting data for {start_date} to {end_date}")
+    logger.info("Extracting data for %s to %s", start_date, end_date)
     if save_pdf:
         logger.info("PDF download enabled")
         session = create_session()
@@ -395,14 +395,14 @@ def extract_all_areas(start_date: str = None, end_date: str = None, save_pdf: bo
     extracted_dfs = {}
 
     for auth_code, area_name in AREA_CODES.items():
-        logger.info(f"Processing {area_name} (auth={auth_code})")
+        logger.info("Processing %s (auth=%s)", area_name, auth_code)
 
         raw = fetch_applications(auth_code, start_date, end_date)
-        logger.info(f"  Raw records fetched: {len(raw)}")
+        logger.info("  Raw records fetched: %d", len(raw))
 
         extracted = [extract_from_record(app) for app in raw]
         extracted = [r for r in extracted if r is not None]
-        logger.info(f"  Records extracted: {len(extracted)}")
+        logger.info("  Records extracted: %d", len(extracted))
 
         if extracted:
             # Create DataFrame (in-memory, no CSV file)
@@ -412,7 +412,7 @@ def extract_all_areas(start_date: str = None, end_date: str = None, save_pdf: bo
             # Download application forms if enabled
             if save_pdf and session:
                 logger.info(
-                    f"  Downloading application forms for {len(extracted)} records...")
+                    "  Downloading application forms for %d records...", len(extracted))
                 forms_downloaded = 0
                 forms_failed = 0
                 forms_skipped = 0
@@ -420,7 +420,7 @@ def extract_all_areas(start_date: str = None, end_date: str = None, save_pdf: bo
                 for i, record in enumerate(extracted, 1):
                     if record.get("url"):
                         logger.debug(
-                            f"  [{i}/{len(extracted)}] Processing {record['uid']}")
+                            "  [%d/%d] Processing %s", i, len(extracted), record['uid'])
                         # Check if file existed BEFORE attempting download
                         was_already_present = USE_S3 and not force_pdf and pdf_exists_in_s3(
                             record["uid"])
@@ -436,10 +436,10 @@ def extract_all_areas(start_date: str = None, end_date: str = None, save_pdf: bo
                         time.sleep(2)
                     else:
                         logger.debug(
-                            f"  [{i}/{len(extracted)}] Skipping {record['uid']} (no URL)")
+                            "  [%d/%d] Skipping %s (no URL)", i, len(extracted), record['uid'])
 
                 logger.info(
-                    f"  Application forms for {area_name}: {forms_downloaded} downloaded, {forms_failed} failed, {forms_skipped} skipped")
+                    "  Application forms for %s: %d downloaded, %d failed, %d skipped", area_name, forms_downloaded, forms_failed, forms_skipped)
 
     return extracted_dfs
 
