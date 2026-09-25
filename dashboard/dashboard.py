@@ -669,7 +669,7 @@ def _conservation_area_style(x):
 
 
 @st.cache_data(show_spinner=False, ttl=3600)
-def build_folium_map(df, heritage_sites, conservation_areas, filters, postcode_coords=None):
+def build_folium_map(df, heritage_sites, conservation_areas, filters, postcode_coords=None, focused_location=None):
     """Build the folium map with all layers and features."""
     import time
     map_start_time = time.time()
@@ -688,12 +688,12 @@ def build_folium_map(df, heritage_sites, conservation_areas, filters, postcode_c
 
     # Determine map center
     zoom_level = 13  # Default zoom
-    if 'focused_location' in st.session_state and st.session_state.focused_location:
-        center_lat = st.session_state.focused_location['lat']
-        center_lon = st.session_state.focused_location['lon']
-        zoom_level = st.session_state.focused_location.get('zoom', 16)
+    if focused_location:
+        center_lat = focused_location['lat']
+        center_lon = focused_location['lon']
+        zoom_level = focused_location.get('zoom', 16)
         logger.info(
-            f"📍 [MAP_BUILD] Map FOCUSED on application {st.session_state.focused_location.get('uid', 'Unknown')} (lat={center_lat:.4f}, lon={center_lon:.4f}, zoom={zoom_level})")
+            f"📍 [MAP_BUILD] Map FOCUSED on application {focused_location.get('uid', 'Unknown')} (lat={center_lat:.4f}, lon={center_lon:.4f}, zoom={zoom_level})")
     elif postcode_coords and 'latitude' in postcode_coords and 'longitude' in postcode_coords:
         # Use postcode coordinates as center
         center_lat = postcode_coords['latitude']
@@ -1443,8 +1443,10 @@ def main():
                 with st.spinner("🗺️ Building map..."):
                     logger.info(
                         f"🎯 [MAIN] Calling build_folium_map() with conservation_areas={len(conservation_areas)} areas, show_conservation_areas={filters.get('show_conservation_areas')}")
+                    focused_loc = st.session_state.get(
+                        'focused_location', None)
                     m = build_folium_map(df_map_filtered, heritage_sites,
-                                         conservation_areas, filters, postcode_coords)
+                                         conservation_areas, filters, postcode_coords, focused_location=focused_loc)
 
                 if m:
                     logger.info(
