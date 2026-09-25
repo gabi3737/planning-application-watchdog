@@ -1,6 +1,6 @@
 # Data Extraction Pipeline
 
-Extracts planning applications from the PlanIt API for areas 304, 318, 323 and processes them through a three-stage ETL pipeline: **Extract → Transform → Load** with in-memory DataFrames and AWS S3/DynamoDB integration.
+Extracts planning applications from the PlanIt API for areas 304 (Greenwich), 318 (Newham), 323 (Tower Hamlets) and processes them through a three-stage ETL pipeline: **Extract → Transform → Load** with in-memory DataFrames and AWS S3/DynamoDB integration.
 
 ## Architecture Overview
 
@@ -244,66 +244,25 @@ python3 load.py --pipeline --local --no-db
 
 ## AWS Lambda Deployment
 
-The ETL pipeline can run on AWS Lambda via Docker. The `lambda_handler()` function in `load.py` executes the full pipeline (extract → transform → load with `--save-pdf`).
+The ETL pipeline can run on AWS Lambda via Docker. The `handler()` function in `load.py` executes the full pipeline (extract → transform → load with `--save-pdf`).
 
 ### Build & Deploy
 
-1. **Build Docker image:**
-   ```bash
-   docker build -t planning-etl:latest .
-   ```
-
-2. **Push to ECR:**
-   ```bash
-   aws ecr create-repository --repository-name planning-etl --region us-east-1
-   aws ecr get-login-password | docker login --username AWS --password-stdin YOUR_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com
-   docker tag planning-etl:latest YOUR_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/planning-etl:latest
-   docker push YOUR_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/planning-etl:latest
-   ```
-
-3. **Create Lambda function:**
-   ```bash
-   aws lambda create-function \
-     --function-name planning-etl-pipeline \
-     --role arn:aws:iam::YOUR_ACCOUNT_ID:role/lambda-etl-role \
-     --code ImageUri=YOUR_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/planning-etl:latest \
-     --package-type Image \
-     --timeout 900 \
-     --memory-size 3008 \
-     --region us-east-1
-   ```
-
-### Invoke
+Authenticate with ECR, build the image, and push to the repository:
 
 ```bash
-# Basic invocation
-aws lambda invoke --function-name planning-etl-pipeline response.json
+# Authenticate Docker with ECR
+aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 
-# With custom dates
-aws lambda invoke --function-name planning-etl-pipeline \
-  --payload '{"start_date":"2024-01-01","end_date":"2024-01-31"}' \
-  response.json
+# Build the image for Lambda (Linux/AMD64 architecture)
+docker build --platform linux/amd64 --provenance=false --sbom=false -t c25-planning-etl-repo:latest .
+
+# Tag the image for ECR
+docker tag c25-planning-etl-repo:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/c25-planning-etl-repo:latest
+
+# Push to ECR
+docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/c25-planning-etl-repo:latest
 ```
-
-### Schedule (EventBridge)
-
-```bash
-# Create daily rule (2 AM UTC)
-aws events put-rule --name planning-etl-daily --schedule-expression "cron(0 2 * * ? *)"
-
-# Add Lambda target
-aws events put-targets --rule planning-etl-daily \
-  --targets Id=1,Arn=arn:aws:lambda:us-east-1:YOUR_ACCOUNT_ID:function:planning-etl-pipeline,\
-RoleArn=arn:aws:iam::YOUR_ACCOUNT_ID:role/eventbridge-lambda-role
-```
-
-### IAM Permissions
-
-Lambda execution role needs:
-- `dynamodb:PutItem`, `dynamodb:UpdateItem`, `dynamodb:Query` on `c25-planning-data-db`
-- `s3:PutObject`, `s3:GetObject`, `s3:ListBucket` on `c25-planning-files-bucket`
-- `logs:CreateLogGroup`, `logs:CreateLogStream`, `logs:PutLogEvents`
-
 ---
 
 ## Troubleshooting

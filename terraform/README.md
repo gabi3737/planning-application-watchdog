@@ -33,8 +33,8 @@ Dashboard application infrastructure using ECS Fargate:
   - Outbound: Ports 80, 443 (HTTP/HTTPS), 53 (DNS)
 - **CloudWatch Log Group** - `/ecs/c25-planning-dashboard` with 7-day retention
 - **ECS Task Definition** - `c25-planning-dashboard-task` configured with:
-  - 1 CPU (1024 units)
-  - 2 GB memory
+  - 2 CPU (2048 units)
+  - 4 GB memory
   - Fargate launch type
   - Container port 8501 exposed
 - **ECS Service** - `c25-planning-dashboard` running 1 task in the ECS cluster with public IP assignment
@@ -61,7 +61,7 @@ Notification system infrastructure:
   - 256 MB memory
   - 60 second timeout
   - Permissions for DynamoDB access and SES email sending
-- **EventBridge Schedule** - Triggers notification Lambda on a schedule
+- **EventBridge Schedule** - Triggers notification Lambda on a schedule (8:00 AM daily)
 - **IAM Roles and Policies** - `c25-planning-notification-lambda-role` and `c25-planning-notification-schedule-role` with permissions for logging, DynamoDB queries, and SES email operations
 
 ### variables.tf
@@ -72,7 +72,7 @@ Configuration variables:
 - `vpc_id` - VPC identifier
 - `ecs_cluster_name` - ECS cluster name (default: `c25-ecs-cluster`)
 - `subnet_group_name` - Subnet group name (default: `c25-public-subnet`)
-- `account_id` - AWS account ID (default: `129033205317`)
+- `account_id` - AWS account ID
 
 ### terraform.tfvars
 Contains variable values for the Terraform deployment (not tracked in version control for security).
@@ -88,14 +88,14 @@ Contains variable values for the Terraform deployment (not tracked in version co
 
 Estimated monthly costs:
 
-- **ECS Service (Fargate)** - Runs dashboard with 1 CPU and 2 GB memory: ~£41.45
+- **ECS Service (Fargate)** - Runs dashboard with 2 CPU and 4 GB memory: ~£62.60
 - **Lambda Functions** - Both ETL and notification functions: £0 (free tier)
 - **EventBridge Schedules** - Two schedules for ETL and notification triggers: £0 (free tier)
 - **DynamoDB Tables** - For 1,000 application reads per day and 100 user accesses daily: <£0.50
 - **S3 Bucket** - Storage for planning documents at £0.018/GB/month (currently ~30 MB): ~£0
 - **ECR Repositories** - Three repositories for dashboard, ETL, and notification images: £0 (under 50 GB is free)
 - **SES Email Service** - For 100 subscribers with 2-3 areas receiving notifications daily: <£1.00
-- **Total estimated monthly cost**: ~£43.00
+- **Total estimated monthly cost**: ~£64.10
 
 ## Deployment
 
