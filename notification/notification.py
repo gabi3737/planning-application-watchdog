@@ -1,12 +1,12 @@
 """Functions to load DynamoDB user data for notification system"""
 
 import os
+import logging
+from datetime import date
 
 import boto3
-import logging
 from dotenv import load_dotenv
 import pandas as pd
-from datetime import date
 
 EMAIL_HOST = "sl-coaches@proton.me"
 
@@ -54,12 +54,12 @@ def load_user_data(session: boto3.Session) -> pd.DataFrame:
                 ExclusiveStartKey=response["LastEvaluatedKey"])
             data.extend(response.get("Items", []))
         dataframe = pd.DataFrame(data)
-        logging.info(f"Loaded {len(dataframe)} records from DynamoDB.")
+        logging.info("Loaded %d records from DynamoDB.", len(dataframe))
 
         return dataframe
 
     except Exception as e:
-        logging.error(f"Error loading user data from DynamoDB: {e}")
+        logging.error("Error loading user data from DynamoDB: %s", e)
         raise
 
 
@@ -71,9 +71,9 @@ def get_active_emails(user_data_df: pd.DataFrame) -> pd.DataFrame:
         raise ValueError(
             "DataFrame must contain 'email', 'active', and 'area' columns.")
 
-    active_users_df = user_data_df.loc[user_data_df["active"] == True, [
+    active_users_df = user_data_df.loc[user_data_df["active"] is True, [
         "email", "area"]]
-    logging.info(f"Found {len(active_users_df)} active users.")
+    logging.info("Found %d active users.", len(active_users_df))
 
     return active_users_df
 
@@ -88,12 +88,12 @@ def load_planning_data(session: boto3.Session) -> pd.DataFrame:
         response = table.scan()
         data = response.get("Items", [])
         dataframe = pd.DataFrame(data)
-        logging.info(f"Loaded {len(dataframe)} records from DynamoDB.")
+        logging.info("Loaded %d records from DynamoDB.", len(dataframe))
 
         return dataframe
 
     except Exception as e:
-        logging.error(f"Error loading planning data from DynamoDB: {e}")
+        logging.error("Error loading planning data from DynamoDB: %s", e)
         raise
 
 
@@ -120,7 +120,7 @@ def get_recent_data(planning_data_df: pd.DataFrame) -> pd.DataFrame:
     start_dates = pd.to_datetime(planning_data_df["start_date"]).dt.date
     recent_data_df = planning_data_df.loc[start_dates.isin(recent_dates)]
     logging.info(
-        f"Found {len(recent_data_df)} records for today, yesterday, and the day before yesterday.")
+        "Found %d records for today, yesterday, and the day before yesterday.", len(recent_data_df))
 
     if recent_data_df.empty:
         logging.warning(
@@ -145,9 +145,9 @@ def match_users_to_new_applications(grouped_emails_df: pd.DataFrame,
         matches[email] = matching_applications
         if not matching_applications.empty:
             logging.info(
-                f"Found {len(matching_applications)} matching applications")
+                "Found %d matching applications", len(matching_applications))
         else:
-            logging.info(f"No matching applications found for {email}")
+            logging.info("No matching applications found for %s", email)
 
     return matches
 
@@ -167,13 +167,14 @@ def dataframe_to_html(application_df: pd.DataFrame) -> str:
 
 
 def create_html_body(recipient: str, applications_df: pd.DataFrame) -> str:
-
+    """Creates the HTML body for the email."""
     applications_html = dataframe_to_html(applications_df)
+
     return f"<p>Dear {recipient},</p><p>Here are the new planning applications matching your areas of interest:</p>{applications_html}"
 
 
 def send_email(ses_client, sender: str, recipient: str, applications_df: pd.DataFrame) -> str:
-    """"""
+    """Sends an email with the new planning applications to the recipient."""
     if applications_df.empty:
         subject = "No new planning applications found"
     else:
@@ -194,6 +195,7 @@ def send_email(ses_client, sender: str, recipient: str, applications_df: pd.Data
 
 
 def send_all_emails(session: boto3.session, matches: dict[str, pd.DataFrame], sender: str) -> dict[str, str]:
+    """Sends emails to all recipients with their matching planning applications."""
 
     ses_client = session.client('ses')
     message_ids = {}
@@ -212,6 +214,7 @@ def send_all_emails(session: boto3.session, matches: dict[str, pd.DataFrame], se
 
 
 def main() -> dict[str, str]:
+    """Main function for the daily notification pipeline."""
     session = create_boto3_session()
 
     user_data_df = load_user_data(session)
