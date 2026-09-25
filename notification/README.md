@@ -30,10 +30,26 @@ python notification.py
 
 ### Docker Build
 
+Then authenticate with ECR, build the image, and push to the repository:
+
 ```bash
-docker build -t planning-watchdog-notification .
-docker run --env-file .env planning-watchdog-notification
+# Authenticate Docker with ECR
+aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+
+# Build the image for Lambda (Linux/AMD64 architecture)
+docker build --platform linux/amd64 --provenance=false --sbom=false -t c25-planning-notification-repo:latest .
+
+# Tag the image for ECR
+docker tag c25-planning-notification-repo:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/c25-planning-notification-repo:latest
+
+# Push to ECR
+docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/c25-planning-notification-repo:latest
 ```
+
+**Notes:**
+- `--platform linux/amd64` ensures compatibility with AWS Lambda's execution environment
+- `--provenance=false --sbom=false` reduces build time by skipping unnecessary metadata
+- Replace `<your_aws_account_id>` with your actual AWS account ID
 
 ## Environment Variables
 
@@ -54,6 +70,21 @@ PLANNING_TABLE_NAME=<dynamodb_planning_applications_table_name>
 - **Subscribers**: AWS DynamoDB (populated via dashboard subscription form)
 - **Planning Applications**: AWS DynamoDB (populated by pipeline)
 - **Email Delivery**: Amazon SES
+
+## Architecture
+
+```
+planning-application-watchdog/notification/
+├── notification.py              # Main Lambda handler and notification logic
+├── test_notification.py         # Unit tests
+├── requirements.txt             # Python dependencies
+├── Dockerfile                   # Container configuration for Lambda
+└── README.md                    # This file
+```
+
+**Key Components:**
+- `notification.py` — Entry point for the Lambda function; queries DynamoDB for subscribers and new applications, renders HTML emails, and sends via SES
+- `test_notification.py` — Unit tests for notification logic and email rendering
 
 ## Troubleshooting
 

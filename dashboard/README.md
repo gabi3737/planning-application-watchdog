@@ -29,14 +29,23 @@ pip install -r requirements.txt
 # The dark theme is pre-configured
 
 # Run the dashboard
-streamlit run dashboard_v2.py
+streamlit run dashboard.py
 ```
 
 ### Docker Build
 
 ```bash
-docker build -t planning-watchdog-dashboard .
-docker run -p 8501:8501 --env-file .env planning-watchdog-dashboard
+# Authenticate Docker with ECR
+aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+
+# Build the image for Lambda (Linux/AMD64 architecture)
+docker build --platform linux/amd64 c25-planning-dashboard-repo:latest .
+
+# Tag the image for ECR
+docker tag c25-planning-dashboard-repo:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/c25-planning-dashboard-repo:latest
+
+# Push to ECR
+docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/c25-planning-dashboard-repo:latest
 ```
 
 ## Environment Variables
@@ -63,11 +72,24 @@ OPENAI_API_KEY=<your_openai_api_key>
 ## Architecture
 
 ```
-dashboard_v2.py          # Main Streamlit application
-├── data_functions.py    # AWS DynamoDB and API interactions
-├── ai_summary_functions.py  # OpenAI integration
-└── dynamodb_functions.py    # Email subscription management
+planning-application-watchdog/dashboard/
+├── dashboard.py                 # Main Streamlit application
+├── data_functions.py            # AWS DynamoDB and API interactions
+├── dynamodb_functions.py        # Email subscription management
+├── test_*.py                    # Unit tests for each module
+├── requirements.txt             # Python dependencies
+├── Dockerfile                   # Container configuration for ECS
+├── .streamlit/
+│   └── config.toml              # Streamlit theme and config
+└── assets/
+    ├── TerraNotice_NoBackground.png   # Logo without background
+    └── TerraNotice_Transparent.png    # Logo transparent version
 ```
+
+**Key Components:**
+- `dashboard.py` — Main entry point; handles layout, filtering, and map rendering
+- `data_functions.py` — Loads planning data from DynamoDB, fetches heritage sites and conservation areas, manages postcode searches
+- `dynamodb_functions.py` — Manages user email subscriptions (subscribe/unsubscribe)
 
 ## Configuration
 
