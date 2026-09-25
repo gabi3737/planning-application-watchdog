@@ -1034,6 +1034,32 @@ STATUS_BADGE_MAP = {
     "N/A": "• No Status",
 }
 
+# Map application status to description
+STATUS_DESCRIPTION_MAP = {
+    "Permitted": "The planning application has been approved by the local authority. The applicant may proceed with the proposed development.",
+    "Undecided": "The planning application is currently under review by the local authority. A decision is pending.",
+    "Withdrawn": "The applicant has withdrawn their planning application. No decision has been made.",
+    "N/A": "The current status of this planning application is not available.",
+}
+
+# Map application types to descriptions
+APP_TYPE_DESCRIPTION_MAP = {
+    "Full": "A full planning permission application for construction, extension, or alteration of buildings and structures.",
+    "Outline": "An outline planning permission to establish in principle whether a proposed development is acceptable. Detailed design to follow.",
+    "Amendment": "An application to modify or change an existing approved planning permission or conditions.",
+    "Conditions": "An application to discharge or vary conditions attached to an existing planning permission.",
+    "Trees": "An application related to tree works such as felling, pruning, or planting in a designated conservation area.",
+    "Work to Trees": "An application requesting consent for works to protected trees or trees in conservation areas.",
+    "Heritage": "An application related to development affecting listed buildings, conservation areas, or other heritage assets.",
+    "Listed Building": "An application for works to a listed building requiring Listed Building Consent from the local authority.",
+    "Advertising": "An application for the erection or display of advertisements, hoardings, or signage.",
+    "Telecoms": "An application related to telecommunications infrastructure, including masts, antennae, or cabinets.",
+    "Compliance": "An application to ensure compliance with existing planning conditions or enforcement requirements.",
+    "Non-Material Amendment": "An application to make minor changes that are not considered material to an approved planning permission.",
+    "N/A": "The application type for this planning application could not be determined.",
+    "Other": "A planning application that does not fit into the standard categories listed above.",
+}
+
 
 def get_status_color(status: str) -> str:
     """Get the color for a given application status."""
@@ -1043,6 +1069,16 @@ def get_status_color(status: str) -> str:
 def get_status_badge(status: str) -> str:
     """Get the badge text for a given application status."""
     return STATUS_BADGE_MAP.get(status, "• Unknown")
+
+
+def get_status_description(status: str) -> str:
+    """Get the description for a given application status."""
+    return STATUS_DESCRIPTION_MAP.get(status, "Status information not available.")
+
+
+def get_app_type_description(app_type: str) -> str:
+    """Get the description for a given application type."""
+    return APP_TYPE_DESCRIPTION_MAP.get(app_type, "Application type information not available.")
 
 
 def format_date_for_display(date_value) -> str:
@@ -1070,6 +1106,8 @@ def build_summary_card_html(app_info: dict) -> str:
 
     status_color = get_status_color(status)
     status_badge = get_status_badge(status)
+    status_desc = get_status_description(status)
+    app_type_desc = get_app_type_description(app_type)
 
     # Escape any HTML characters in text fields
     uid = uid.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -1080,10 +1118,18 @@ def build_summary_card_html(app_info: dict) -> str:
     area = area.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     summary = summary.replace("&", "&amp;").replace(
         "<", "&lt;").replace(">", "&gt;")
+    status_desc = status_desc.replace("&", "&amp;").replace(
+        "<", "&lt;").replace(">", "&gt;")
+    app_type_desc = app_type_desc.replace("&", "&amp;").replace(
+        "<", "&lt;").replace(">", "&gt;")
 
     summary_section = f'<div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #2d5a35;"><div style="font-size: 13px; font-weight: 600; color: {THEME_TEXT}; margin-bottom: 8px;">📋 AI Summary</div><div style="font-size: 13px; line-height: 1.5; color: {THEME_TEXT};">{summary}</div></div>'
 
-    card_html = f'<div style="border: 1px solid #2d5a35; border-left: 4px solid {status_color}; border-radius: 8px; padding: 16px; background-color: {THEME_BG_SECONDARY}; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif;"><div style="margin-bottom: 12px;"><div style="font-size: 16px; font-weight: 700; color: {THEME_TEXT}; word-break: break-word;">{uid}</div><div style="font-size: 12px; font-weight: 500; color: {status_color}; margin-top: 4px;">{status_badge}</div></div><div style="height: 1px; background-color: #2d5a35; margin: 12px 0;"></div><div style="margin-bottom: 8px;"><div style="margin-bottom: 10px;"><div style="font-size: 12px; font-weight: 500; color: {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Address</div><div style="font-size: 13px; color: {THEME_TEXT}; word-break: break-word;">{address}</div></div><div style="margin-bottom: 10px;"><div style="font-size: 12px; font-weight: 500; color: {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Date</div><div style="font-size: 13px; color: {THEME_TEXT};">{start_date}</div></div><div style="margin-bottom: 10px;"><div style="font-size: 12px; font-weight: 500; color: {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Type</div><div style="font-size: 13px; color: {THEME_TEXT};">{app_type}</div></div><div><div style="font-size: 12px; font-weight: 500; color: {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Council</div><div style="font-size: 13px; color: {THEME_TEXT};">{area}</div></div></div>{summary_section}</div>'
+    # Info icon with tooltip
+    status_info_icon = f'<span style="display: inline-block; width: 16px; height: 16px; margin-left: 6px; background-color: {status_color}; color: white; border-radius: 50%; text-align: center; line-height: 16px; font-size: 11px; font-weight: bold; cursor: help;" title="{status_desc}">?</span>'
+    type_info_icon = f'<span style="display: inline-block; width: 16px; height: 16px; margin-left: 6px; background-color: #5a7c5a; color: {THEME_TEXT}; border-radius: 50%; text-align: center; line-height: 16px; font-size: 11px; font-weight: bold; cursor: help;" title="{app_type_desc}">?</span>'
+
+    card_html = f'<div style="border: 1px solid #2d5a35; border-left: 4px solid {status_color}; border-radius: 8px; padding: 16px; background-color: {THEME_BG_SECONDARY}; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif;"><div style="margin-bottom: 12px;"><div style="font-size: 16px; font-weight: 700; color: {THEME_TEXT}; word-break: break-word;">{uid}</div><div style="font-size: 12px; font-weight: 500; color: {status_color}; margin-top: 4px;">{status_badge}{status_info_icon}</div></div><div style="height: 1px; background-color: #2d5a35; margin: 12px 0;"></div><div style="margin-bottom: 8px;"><div style="margin-bottom: 10px;"><div style="font-size: 12px; font-weight: 500; color: {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Address</div><div style="font-size: 13px; color: {THEME_TEXT}; word-break: break-word;">{address}</div></div><div style="margin-bottom: 10px;"><div style="font-size: 12px; font-weight: 500; color: {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Date</div><div style="font-size: 13px; color: {THEME_TEXT};">{start_date}</div></div><div style="margin-bottom: 10px;"><div style="font-size: 12px; font-weight: 500; color: {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Type{type_info_icon}</div><div style="font-size: 13px; color: {THEME_TEXT};">{app_type}</div></div><div><div style="font-size: 12px; font-weight: 500; color: {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Council</div><div style="font-size: 13px; color: {THEME_TEXT};">{area}</div></div></div>{summary_section}</div>'
 
     return card_html
 
@@ -1155,6 +1201,8 @@ def create_application_card(app: dict) -> str:
 
     status_color = get_status_color(status)
     status_badge = get_status_badge(status)
+    status_desc = get_status_description(status)
+    app_type_desc = get_app_type_description(app_type)
 
     # Escape any HTML characters in text fields
     uid = uid.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -1165,6 +1213,10 @@ def create_application_card(app: dict) -> str:
     area = area.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     summary = summary.replace("&", "&amp;").replace(
         "<", "&lt;").replace(">", "&gt;")
+    status_desc = status_desc.replace("&", "&amp;").replace(
+        "<", "&lt;").replace(">", "&gt;")
+    app_type_desc = app_type_desc.replace("&", "&amp;").replace(
+        "<", "&lt;").replace(">", "&gt;")
 
     card_html = f"""<div style="border: 1px solid #2d5a35; border-left: 4px solid {status_color};
      border-radius: 0px; padding: 16px; background-color: {THEME_BG_SECONDARY};
@@ -1173,7 +1225,7 @@ def create_application_card(app: dict) -> str:
      display: flex; flex-direction: column;"><div style="margin-bottom: 12px;">
      <div style="font-size: 16px; font-weight: 700; color: {THEME_TEXT}; word-break:
      break-word;">{uid}</div><div style="font-size: 12px; font-weight: 500;
-     color: {status_color}; margin-top: 4px;">{status_badge}</div></div><div style="height:
+     color: {status_color}; margin-top: 4px;">{status_badge}<span style="display: inline-block; width: 16px; height: 16px; margin-left: 6px; background-color: {status_color}; color: white; border-radius: 50%; text-align: center; line-height: 16px; font-size: 11px; font-weight: bold; cursor: help;" title="{status_desc}">?</span></div></div><div style="height:
      1px; background-color: #2d5a35; margin: 12px 0;"></div><div style="margin-bottom: 8px;
      flex: 1;"><div style="margin-bottom: 10px;"><div style="font-size: 12px; font-weight:
      500; color: {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">
@@ -1183,7 +1235,7 @@ def create_application_card(app: dict) -> str:
      letter-spacing: 0.5px;">Date</div><div style="font-size: 13px; color: {THEME_TEXT};">
      {start_date}</div></div><div style="margin-bottom: 10px;"><div style="font-size: 12px;
      font-weight: 500; color: {THEME_TEXT_MUTED}; text-transform: uppercase;
-     letter-spacing: 0.5px;">Type</div><div style="font-size: 13px; color: {THEME_TEXT};">
+     letter-spacing: 0.5px;">Type<span style="display: inline-block; width: 16px; height: 16px; margin-left: 6px; background-color: #5a7c5a; color: {THEME_TEXT}; border-radius: 50%; text-align: center; line-height: 16px; font-size: 11px; font-weight: bold; cursor: help;" title="{app_type_desc}">?</span></div><div style="font-size: 13px; color: {THEME_TEXT};">
      {app_type}</div></div><div><div style="font-size: 12px; font-weight: 500; color:
      {THEME_TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px;">Council
      </div><div style="font-size: 13px; color: {THEME_TEXT};">{area}</div></div></div>
