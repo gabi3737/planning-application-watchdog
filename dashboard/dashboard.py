@@ -1482,12 +1482,18 @@ def main():
                 area_chart = build_applications_per_area_chart(df_filtered)
                 if area_chart is not None:
                     st.altair_chart(area_chart, use_container_width=True)
+                st.markdown(
+                    '<div style="background-color: #2e7d32; border-left: 4px solid #5FCB5F; padding: 12px; border-radius: 4px; margin-top: 8px;"><p style="margin: 0; font-size: 13px; color: #ffffff;">📊 Shows the distribution of planning applications across areas. Helps identify which areas have the most activity.</p></div>',
+                    unsafe_allow_html=True)
 
             with col_status:
                 st.markdown("**Application Status Breakdown**")
                 donut_chart = build_status_donut_chart(df_filtered)
                 if donut_chart is not None:
                     st.altair_chart(donut_chart, use_container_width=True)
+                st.markdown(
+                    '<div style="background-color: #2e7d32; border-left: 4px solid #5FCB5F; padding: 12px; border-radius: 4px; margin-top: 8px;"><p style="margin: 0; font-size: 13px; color: #ffffff;">⏳ Displays the current status of planning applications: Permitted, Undecided, or Withdrawn. Provides a quick overview of decision outcomes.</p></div>',
+                    unsafe_allow_html=True)
 
         col_heritage, col_conservation = st.columns(2, gap="medium")
 
@@ -1496,6 +1502,9 @@ def main():
             heritage_chart = build_heritage_bar_chart()
             if heritage_chart is not None:
                 st.altair_chart(heritage_chart, use_container_width=True)
+                st.markdown(
+                    '<div style="background-color: #2e7d32; border-left: 4px solid #5FCB5F; padding: 12px; border-radius: 4px; margin-top: 8px;"><p style="margin: 0; font-size: 13px; color: #ffffff;">⭐ Shows the number of registered heritage sites in each council area. Important for planning decisions near historic structures.</p></div>',
+                    unsafe_allow_html=True)
             else:
                 st.info(
                     "No heritage sites found for the selected area(s).")
@@ -1505,6 +1514,9 @@ def main():
             conservation_chart = build_conservation_bar_chart()
             if conservation_chart is not None:
                 st.altair_chart(conservation_chart, use_container_width=True)
+                st.markdown(
+                    '<div style="background-color: #2e7d32; border-left: 4px solid #5FCB5F; padding: 12px; border-radius: 4px; margin-top: 8px;"><p style="margin: 0; font-size: 13px; color: #ffffff;">🌳 Displays the number of conservation areas in each council area. These areas require special consideration for architectural and environmental protection.</p></div>',
+                    unsafe_allow_html=True)
             else:
                 st.info(
                     "No conservation sites found for the selected area(s).")
@@ -1516,6 +1528,9 @@ def main():
             type_chart = build_type_chart_per_area(df_filtered)
             if type_chart is not None:
                 st.altair_chart(type_chart, use_container_width=True)
+                st.markdown(
+                    '<div style="background-color: #2e7d32; border-left: 4px solid #5FCB5F; padding: 12px; border-radius: 4px; margin-top: 8px;"><p style="margin: 0; font-size: 13px; color: #ffffff;">📋 Breaks down planning applications by type (e.g., Householder, Full Planning, Listed Building). Reveals trends in the kinds of development being proposed.</p></div>',
+                    unsafe_allow_html=True)
             else:
                 st.info(
                     "No application types found for the selected area(s).")
