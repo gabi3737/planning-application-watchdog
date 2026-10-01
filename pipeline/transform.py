@@ -252,7 +252,7 @@ def generate_summary(openai_client: OpenAI, pdf_text: str, metadata_dict: dict) 
 
         logger.debug(f"   Calling OpenAI API...")
         response = openai_client.beta.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5-nano",
             messages=[
                 {
                     "role": "system",
