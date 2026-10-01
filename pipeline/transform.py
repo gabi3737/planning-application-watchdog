@@ -67,6 +67,9 @@ SKIP_SUMMARY = False
 # This allows summaries to be generated only after comparing with existing records
 # to avoid unnecessary API calls
 
+# ChatGPT Model - Chosen for cost-effectiveness
+AI_MODEL = "gpt-5-nano"
+
 
 def get_boto3_session() -> boto3.Session:
     """Creates and returns a boto3 session using environment variables."""
@@ -252,7 +255,7 @@ def generate_summary(openai_client: OpenAI, pdf_text: str, metadata_dict: dict) 
 
         logger.debug(f"   Calling OpenAI API...")
         response = openai_client.beta.chat.completions.create(
-            model="gpt-5-nano",
+            model=AI_MODEL,
             messages=[
                 {
                     "role": "system",
